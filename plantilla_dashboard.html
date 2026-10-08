@@ -1,0 +1,397 @@
+<title>Estudio de Datos de Longevidad</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Concepto: panel clínico de lectura rápida. Resumen arriba, detalle abajo, color semántico solo para estado. */
+:root{--bg:#f3f6f6;--card:#ffffff;--ink:#0e1d27;--mut:#53636f;--line:#d9e2e5;--acc:#0b7a78;--acc2:#3557c9;--soft:#e2f1f0;
+--ok:#177a43;--okbg:#e2f4e8;--warn:#a85d00;--warnbg:#fbeed8;--bad:#b3261e;--badbg:#fbe4e2;--s1:#7d8b96;--s2:#0b7a78;--s3:#3557c9;--s4:#c27a12;--s5:#7a4fc1;--s6:#c0392b;
+--sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0b1418;--card:#111e24;--ink:#e5eef2;--mut:#9db0ba;--line:#223540;--acc:#35c4bf;--acc2:#7f9bf0;--soft:#12333a;
+--ok:#4cc27f;--okbg:#10301f;--warn:#e9a54a;--warnbg:#3a2a10;--bad:#f0746b;--badbg:#3d1a18;--s1:#8fa0ab;--s2:#35c4bf;--s3:#7f9bf0;--s4:#e9a54a;--s5:#b497ee;--s6:#f0746b;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b1418;--card:#111e24;--ink:#e5eef2;--mut:#9db0ba;--line:#223540;--acc:#35c4bf;--acc2:#7f9bf0;--soft:#12333a;
+--ok:#4cc27f;--okbg:#10301f;--warn:#e9a54a;--warnbg:#3a2a10;--bad:#f0746b;--badbg:#3d1a18;--s1:#8fa0ab;--s2:#35c4bf;--s3:#7f9bf0;--s4:#e9a54a;--s5:#b497ee;--s6:#f0746b;color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);padding-inline:16px}
+*{box-sizing:border-box}
+.wrap{max-width:1000px;margin:0 auto;padding-block:12px 28px}
+header{padding-block:6px 10px}
+h1{font-size:21px;line-height:1.2;margin:0 0 3px;font-weight:600;text-wrap:balance}
+h2{font-size:16px;margin:18px 0 8px;font-weight:600;text-wrap:balance}
+.sub{color:var(--mut);font-size:13px}
+.tag{display:inline-block;margin-top:7px;padding:2px 10px;border-radius:999px;background:var(--soft);color:var(--acc);font-size:12px;font-weight:600}
+nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);display:flex;gap:6px;overflow-x:auto;padding-block:8px;border-bottom:1px solid var(--line)}
+nav button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:7px 12px;font:inherit;font-size:13px;cursor:pointer}
+nav button.on{background:var(--acc);border-color:var(--acc);color:var(--bg)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--acc2);outline-offset:2px}
+section{display:none;padding-top:12px}section.on{display:block}
+.grid{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(min-width:760px){.g4{grid-template-columns:repeat(4,minmax(0,1fr))}.g3{grid-template-columns:repeat(3,minmax(0,1fr))}.two{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+.two{grid-template-columns:minmax(0,1fr)}
+.stack{display:grid;gap:10px;min-width:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}
+.card h3{margin:0 0 4px;font-size:14px;font-weight:600}
+.card p{margin:4px 0;color:var(--mut);font-size:13px}
+.kpi .v{font:500 22px/1.1 var(--mono);font-variant-numeric:tabular-nums}
+.kpi .l{color:var(--mut);font-size:12px;margin-top:4px}
+.kpi .d{font-size:12px;margin-top:4px;color:var(--ink)}
+.chart{position:relative;height:250px}.chart.tall{height:300px}.chart.short{height:200px}
+.note{border-radius:8px;padding:9px 11px;font-size:12.5px;background:var(--warnbg);color:var(--ink);border:1px solid var(--line)}
+.note.info{background:var(--soft)}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+td.wrapc{white-space:normal;min-width:180px}
+th{color:var(--mut);font-weight:600;font-size:12px}
+.pill{display:inline-block;min-width:34px;text-align:center;border-radius:6px;padding:2px 7px;font:500 12.5px var(--mono)}
+.ok{background:var(--okbg);color:var(--ok)}.warn{background:var(--warnbg);color:var(--warn)}.bad{background:var(--badbg);color:var(--bad)}
+.chip{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:1px 8px;margin:2px 4px 2px 0;font-size:12px;background:var(--bg)}
+select,input[type=range]{width:100%;font:inherit}
+select{padding:9px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+label{font-size:12px;color:var(--mut);display:block;margin-bottom:3px}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:3px 0 7px}.bar i{display:block;height:100%}
+.small{font-size:12px;color:var(--mut)}
+ul{margin:4px 0 0 18px;padding:0;font-size:13px}li{margin-bottom:2px}
+.cmp{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:8px;align-items:start;font-size:12.5px;padding-block:7px;border-bottom:1px solid var(--line)}
+.cmp code{font:12px var(--mono);overflow-wrap:anywhere;color:var(--bad)}.cmp code.n{color:var(--ok)}
+.go{border:1px solid var(--line);background:var(--card);color:var(--acc);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px;cursor:pointer;text-align:left}
+.timeline{border-left:2px solid var(--line);margin:6px 0 0 6px;padding-left:12px;display:grid;gap:8px}
+.timeline div{font-size:13px}.timeline b{font-family:var(--mono);font-weight:500}
+.up{color:var(--bad)}.dn{color:var(--ok)}
+a{color:var(--acc2)}
+footer{color:var(--mut);font-size:12px;padding-block:16px 24px}
+</style>
+<div class="wrap">
+<header>
+  <h1>Estudio de Datos de Longevidad</h1>
+  <div class="sub">Demo de analítica longitudinal inspirada en una clínica de medicina preventiva y longevidad · 8.000 pacientes · visitas a 0, 6 y 12 meses</div>
+  <span class="tag">Datos 100% sintéticos · apoyo a la decisión médica, no diagnóstico</span>
+</header>
+<nav id="tabs">
+  <button data-t="resumen" class="on">Resumen</button><button data-t="datos">Datos y operación</button><button data-t="pac">Paciente</button>
+  <button data-t="edad">Edad biológica</button><button data-t="seg">Segmentos</button><button data-t="prev">Prevención</button><button data-t="sim">Simulador</button>
+</nav>
+
+<section id="resumen" class="on">
+  <div class="grid g4" id="kpis"></div>
+  <div class="stack" style="margin-top:10px">
+    <div class="card"><h3>Qué hace este proyecto</h3>
+      <p>Toma los datos sueltos de una clínica de longevidad (estudios, hábitos, historia clínica), los ordena en una línea de tiempo por paciente y muestra cómo cambian la edad biológica, los padecimientos y los síntomas cuando el paciente cambia sus hábitos. El médico decide; el tablero ordena la información para que decida con el cuadro completo.</p></div>
+    <div class="grid g3" id="rutas"></div>
+    <div class="note info" id="resNote"></div>
+  </div>
+</section>
+
+<section id="datos">
+  <div class="stack">
+    <div class="card"><h3>1 · De archivos sueltos a una tabla confiable</h3>
+      <p id="dIntro"></p><div class="tw"><table id="tFix"></table></div></div>
+    <div class="card"><h3>Antes y después</h3><div id="ejemplos"></div></div>
+    <div class="card"><h3>Validación contra los datos de origen</h3><div class="tw"><table id="tVal"></table></div><div class="note" id="valNote" style="margin-top:8px"></div></div>
+    <h2 style="margin:6px 0 0">2 · Operación de la clínica (simulada)</h2>
+    <div class="grid two">
+      <div class="card"><h3>Embudo de los 3 pasos y seguimiento</h3><div class="chart"><canvas id="cFun"></canvas></div><p id="funP"></p></div>
+      <div class="card"><h3>Días entre estudios e integración</h3><div class="chart"><canvas id="cDias"></canvas></div><p id="diasP"></p></div>
+    </div>
+    <div class="grid two">
+      <div class="card"><h3>Retención según adherencia</h3><div class="chart"><canvas id="cRet"></canvas></div></div>
+      <div class="card"><h3>Calidad de la anamnesis</h3><div id="cobert"></div></div>
+    </div>
+    <div class="card" id="ctx"></div>
+  </div>
+</section>
+
+<section id="pac">
+  <div class="stack">
+    <div class="card"><label for="sel">Paciente simulado</label><select id="sel"></select></div>
+    <div class="card" id="pInfo"></div>
+    <div class="grid two">
+      <div class="card"><h3>Historia y línea de tiempo clínica</h3><div id="pTL"></div></div>
+      <div class="card"><h3>Edad biológica a lo largo del tiempo</h3><div class="chart"><canvas id="cPat"></canvas></div><p id="pMsg"></p></div>
+    </div>
+    <div class="card" id="pGen"></div>
+    <div class="card"><h3>Semáforo por área y Score de Longevidad</h3><div class="tw"><table id="tSem"></table></div></div>
+    <div class="grid two">
+      <div class="card"><h3>Marcadores clave</h3><div class="tw"><table id="tMk"></table></div><p class="small">* El PIC es un índice genérico (placeholder).</p></div>
+      <div class="card"><h3>Hábitos y estrés (anamnesis)</h3><div class="tw"><table id="tHab"></table></div></div>
+    </div>
+    <div class="grid two">
+      <div class="card"><h3>Síntomas que reporta el paciente (0 a 10)</h3><div class="tw"><table id="tSin"></table></div></div>
+      <div class="card"><h3>Padecimientos y alertas por visita</h3><div class="tw"><table id="tCond"></table></div></div>
+    </div>
+    <div class="card" id="pInf"></div>
+    <div class="grid two">
+      <div class="card"><h3 class="up">Empujan la edad hacia arriba</h3><ul id="up"></ul></div>
+      <div class="card"><h3 class="dn">Empujan la edad hacia abajo</h3><ul id="dn"></ul></div>
+    </div>
+  </div>
+</section>
+
+<section id="edad">
+  <div class="stack">
+    <div class="card"><h3>Edad biológica vs. cronológica</h3><p>Cada punto es un paciente en su primera visita. Sobre la diagonal, la edad biológica estimada es mayor a la cronológica.</p><div class="chart tall"><canvas id="cScatter"></canvas></div></div>
+    <div class="grid two">
+      <div class="card"><h3>Brecha modificable (años)</h3><p>Edad biológica menos cronológica. A la derecha, envejecimiento más acelerado.</p><div class="chart"><canvas id="cHist"></canvas></div></div>
+      <div class="card"><h3>Qué variables pesan más</h3><p>Biomarcadores, composición física y hábitos.</p><div class="chart"><canvas id="cImp"></canvas></div></div>
+    </div>
+    <div class="card" id="genCard"></div>
+    <div class="card" id="valid"></div>
+  </div>
+</section>
+
+<section id="seg">
+  <div class="stack">
+    <div class="card"><h3>Mapa de segmentos</h3><p>Proyección en 2 dimensiones de los 5 scores por área (0 a 100, más alto es mejor).</p><div class="chart tall"><canvas id="cPca"></canvas></div></div>
+    <div id="segCards" class="stack"></div>
+    <div class="note info" id="segNote"></div>
+  </div>
+</section>
+
+<section id="prev">
+  <div class="stack">
+    <div class="note info">Esta pestaña compara pacientes con un plan preventivo contra pacientes con seguimiento estándar (sin plan personalizado). Las diferencias salen de los efectos que se cargaron en el simulador: muestran qué preguntas se podrían responder con datos reales de una clínica, y no demuestran que la medicina preventiva funcione.</div>
+    <div class="card"><h3>Brecha de edad media por protocolo</h3><p>Promedio en cada hito. Bajar es mejorar.</p><div class="chart tall"><canvas id="cTrend"></canvas></div></div>
+    <div class="card"><h3>Resultados por protocolo</h3><div class="tw"><table id="tProto"></table></div>
+      <p class="small">Δ = cambio de la brecha a 12 meses en años (IC 95%). Ritmo = años biológicos por año real (1,0 es envejecer al ritmo del calendario). Respondedor: mejora de al menos 0,5 años en el tramo. Δ Longevidad: puntos del Score a 12 meses.</p></div>
+    <div class="grid two">
+      <div class="card"><h3>Score de Longevidad promedio</h3><div class="chart"><canvas id="cLong"></canvas></div></div>
+      <div class="card"><h3>Ritmo de envejecimiento según adherencia</h3><div class="chart"><canvas id="cAdh"></canvas></div></div>
+    </div>
+    <div class="grid two">
+      <div class="card"><h3>Mejora por área a 12 meses</h3><p>Cambio medio del score (0 a 100).</p><div class="chart"><canvas id="cDom"></canvas></div></div>
+      <div class="card"><h3>Cambios de hábitos a 12 meses</h3><div class="tw"><table id="tHabP"></table></div><p class="small">Cambio medio por paciente respecto de la primera visita.</p></div>
+    </div>
+    <div class="card"><h3>Síntomas reportados a 12 meses</h3><p>Cambio medio en la escala 0 a 10. Para energía y claridad mental, subir es mejorar; para dolor y molestias, bajar.</p><div class="chart tall"><canvas id="cSin"></canvas></div></div>
+    <div class="grid two">
+      <div class="card" id="hall"></div>
+      <div class="card" id="senal"></div>
+    </div>
+    <div class="grid two">
+      <div class="card"><h3>Padecimientos (% de pacientes)</h3><div class="tw"><table id="tCondP"></table></div><p class="small">Umbrales genéricos y editables, no son los de ninguna clínica real. “Plan” y “Control” se miran entre quienes llegaron a los 12 meses.</p></div>
+      <div class="card"><h3>Eventos clínicos previos</h3><div class="tw"><table id="tEv"></table></div><p class="small">Pacientes con más cirugías, internaciones o diagnósticos previos, y cómo llegan a la primera consulta.</p></div>
+    </div>
+    <div class="note info" id="prevNote"></div>
+  </div>
+</section>
+
+<section id="sim">
+  <div class="stack">
+    <div class="note">Ejemplo ilustrativo: la proyección usa los supuestos del simulador. No es un pronóstico clínico.</div>
+    <div class="card">
+      <div class="grid two">
+        <div><label for="sPac">Paciente de partida</label><select id="sPac"></select></div>
+        <div><label for="sProto">Protocolo</label><select id="sProto"></select></div>
+      </div>
+      <div class="grid two" style="margin-top:10px">
+        <div><label for="sAdh">Adherencia: <b id="sAdhV"></b></label><input id="sAdh" type="range" min="0" max="100" value="80"></div>
+        <div><label for="sMes">Mes a mirar: <b id="sMesV"></b></label><input id="sMes" type="range" min="0" max="12" value="12"></div>
+      </div>
+      <div style="margin-top:10px"><label for="sRit">Ritmo natural de envejecimiento</label><select id="sRit"><option value="normal">Normal</option><option value="acelerado">Acelerado</option></select></div>
+    </div>
+    <div class="card"><h3>Brecha de edad proyectada</h3><div class="chart tall"><canvas id="cSim"></canvas></div><p id="simMsg"></p></div>
+    <div class="grid two">
+      <div class="card"><h3>Score de Longevidad y áreas en el mes elegido</h3><div class="tw"><table id="tSimD"></table></div></div>
+      <div class="card"><h3>Hábitos proyectados</h3><div class="tw"><table id="tSimH"></table></div></div>
+    </div>
+  </div>
+</section>
+
+<footer>Demostración con datos 100% sintéticos generados con Python. Los modelos, los umbrales y las reglas de roadmap son ejemplos metodológicos; toda decisión clínica corresponde al equipo médico. Los valores del PIC y del Oligoscan son placeholders y los genotipos son ficticios.</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const D = /*DATA*/;
+const CTX = /*CTX*/;
+const $=id=>document.getElementById(id);
+const fmt=(x,d=1)=>(x==null||isNaN(x))?'–':Number(x).toLocaleString('es-AR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const sgn=(x,d=2)=>(x==null||isNaN(x))?'–':(x>0?'+':'')+fmt(x,d);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const clip=(x,a,b)=>Math.max(a,Math.min(b,x));
+const DOMS=D.dominios, SH={'Rendimiento físico y cognitivo':'Rendimiento'};
+let charts=[],inited={},patChart=null,simChart=null;
+function pal(){return [css('--s1'),css('--s2'),css('--s3'),css('--s4'),css('--s5'),css('--s6')]}
+function mk(id,cfg){cfg.options=cfg.options||{};cfg.options.maintainAspectRatio=false;cfg.options.responsive=true;const c=new Chart($(id),cfg);charts.push(c);return c}
+function defaults(){Chart.defaults.color=css('--mut');Chart.defaults.borderColor=css('--line');Chart.defaults.font.size=11;Chart.defaults.font.family='IBM Plex Sans, system-ui, sans-serif'}
+const pillCls=v=>v>=55?'ok':v>=40?'warn':'bad';
+const pill=v=>`<span class="pill ${pillCls(v)}">${fmt(v,0)}</span>`;
+const tbl=(h,rows)=>'<tr>'+h.map(x=>`<th>${x}</th>`).join('')+'</tr>'+rows.map(r=>'<tr>'+r.map(x=>`<td>${x}</td>`).join('')+'</tr>').join('');
+const ciTxt=c=>c?sgn(c.m)+' ['+fmt(c.lo,2)+' ; '+fmt(c.hi,2)+']':'–';
+
+/* ---------- Resumen ---------- */
+function resumen(){
+  const k=D.kpi,c=(a,l,d)=>`<div class="card kpi"><div class="v">${a}</div><div class="l">${l}</div>${d?`<div class="d">${d}</div>`:''}</div>`;
+  $('kpis').innerHTML=
+    c(fmt(k.pacientes,0),'pacientes simulados',fmt(k.pro,0)+' en programa PRO, '+fmt(k.pacientes-k.pro,0)+' en programa BASE')+
+    c(fmt(k.ret6,0)+'% / '+fmt(k.ret12,0)+'%','con control a 6 / 12 meses',fmt(k.visitas,0)+' visitas en total')+
+    c(sgn(k.brecha_media,1)+' años','brecha media al inicio',fmt(k.pct_acelerados,0)+'% con 2 o más años de aceleración')+
+    c(fmt(k.resp6_plan.r,0)+'% vs '+fmt(k.resp6_control.r,0)+'%','respondedores a 6 meses','plan preventivo vs seguimiento estándar')+
+    c(sgn(k.d12_plan.m,2)+' vs '+sgn(k.d12_control.m,2),'cambio de la brecha a 12 meses (años)','plan preventivo vs seguimiento estándar')+
+    c(sgn(k.long_plan.m,1)+' vs '+sgn(k.long_control.m,1),'cambio del Score de Longevidad a 12 meses','puntos, plan vs seguimiento estándar')+
+    c(sgn(k.cond_plan_12.m,2)+' vs '+sgn(k.cond_control_12.m,2),'cambio de padecimientos por paciente','a 12 meses, plan vs seguimiento estándar')+
+    c(fmt(D.auc['Con adherencia (señal temprana)'],2),'AUC para anticipar respondedores','con la adherencia de los primeros meses');
+  const R=[['datos','1 · Ordenar lo suelto','Excel, PDFs y formularios con texto libre, unificados y validados.'],['pac','2 · Ver al paciente completo','Historia, hábitos, estrés, genética, estudios y síntomas en una línea de tiempo.'],['edad','3 · Edad biológica','Qué parte de la brecha es genética y fija, y cuál se puede modificar.'],
+           ['prev','4 · Prevención vs. seguimiento estándar','Cómo cambian hábitos, síntomas y padecimientos con un plan.'],['seg','5 · Segmentos y roadmaps','Perfiles para armar el plan, siempre con revisión médica.'],['sim','6 · Simulador','Mové adherencia y protocolo y mirá la proyección.']];
+  $('rutas').innerHTML=R.map(r=>`<button class="go" data-go="${r[0]}"><b>${r[1]}</b><br><span class="small">${r[2]}</span></button>`).join('');
+  $('rutas').querySelectorAll('button').forEach(b=>b.onclick=()=>show(b.dataset.go));
+  $('resNote').innerHTML='<b>Lectura rápida:</b> con plan, la edad biológica relativa baja y los padecimientos por paciente disminuyen; con seguimiento estándar tienden a empeorar levemente. La adherencia es la señal más clara de quién responde. Son diferencias que el simulador construyó: sirven para mostrar el método y las preguntas que se podrían contestar con datos reales.';
+}
+
+/* ---------- Datos y operación ---------- */
+function datos(){
+  const q=D.calidad,p=k=>q.problemas_resueltos[k]||0;
+  $('dIntro').textContent='Se tomaron 200 pacientes de la cohorte y se “desarmaron” en 10 archivos Excel y '+p('pdfs_leidos')+' PDFs con los vicios típicos. Un script de Python los volvió a unir en una fila por visita ('+fmt(q.visitas,0)+' visitas, '+fmt(q.columnas_unificadas,0)+' columnas).';
+  const F=[['DNI escritos en formatos distintos',p('dni_formatos_distintos')],['Fechas guardadas como texto',p('fechas_como_texto')],['… de ellas, ambiguas (día/mes)',p('fechas_ambiguas_dia_mes')],['Decimales escritos con coma',p('decimales_con_coma')],
+           ['Unidades convertidas (glucosa, PCR, vitamina D)',p('conversiones_unidad_glucosa')+p('conversiones_unidad_pcr')+p('conversiones_unidad_vitD')],['Valores censurados (“<0,3”)',p('valores_censurados')],['Valores pendientes o faltantes',p('valores_pendientes_o_faltantes')],
+           ['Filas duplicadas eliminadas',p('filas_duplicadas_eliminadas')],['Pacientes cargados dos veces y fusionados',p('pacientes_duplicados_fusionados')],['PDFs leídos',p('pdfs_leidos')],['Filas de Oligoscan sin DNI, resueltas por nombre',p('oligoscan_filas_sin_dni_resueltas_por_nombre')],
+           ['Filas de D-ROMs/PIC identificadas solo por nombre',p('drom_pic_filas_identificadas_por_nombre')],['Nombres con inicial resueltos (“J. Pérez”)',p('nombres_con_inicial_resueltos')],['Textos libres interpretados (antecedentes, intolerancias, cirugías)',p('textos_libres_interpretados')],['Turnos ausentes excluidos',p('turnos_ausentes_excluidos')]];
+  $('tFix').innerHTML=tbl(['Qué se encontró','Cantidad'],F.map(r=>[r[0],fmt(r[1],0)]));
+  const E=q.ejemplos,L=[['dni','DNI'],['fecha','Fecha'],['unidad','Unidad'],['censurado','Valor censurado'],['pdf','PDF'],['nombre_sin_dni','Sin DNI'],['nombre_inicial','Solo inicial'],['anamnesis_texto','Texto libre']];
+  $('ejemplos').innerHTML=L.filter(l=>E[l[0]]).map(l=>`<div class="cmp"><code>${E[l[0]].origen}</code><span class="small">${l[1]} →</span><code class="n">${E[l[0]].limpio}</code></div>`).join('');
+  $('tVal').innerHTML=tbl(['Grupo de datos','Comparados','Correctos','Exactitud'],q.validacion.map(v=>[v.grupo,fmt(v.comparados,0),fmt(v.correctos,0),`<span class="pill ${v.exactitud>=99?'ok':v.exactitud>=95?'warn':'bad'}">${fmt(v.exactitud,1)}%</span>`]));
+  $('valNote').innerHTML='Cada valor limpio se compara con el dato de origen del simulador. El 100% es optimista: el simulador y el pipeline los escribí yo, así que conozco las trampas. Con archivos reales aparecerán casos que no se previeron. Los datos que faltan en la fuente (por ejemplo estudios no realizados) quedan vacíos y no se inventan. '+q.nota;
+  const o=D.oper,f=o.embudo,s=css('--s2');
+  mk('cFun',{type:'bar',data:{labels:['Consulta','Estudios','Integración','Control 6 m','Control 12 m'],datasets:[{data:[f.consultas,f.estudios,f.integracion,f.control_6m,f.control_12m],backgroundColor:[css('--s1'),s,s,css('--s3'),css('--s3')]}]},options:{indexAxis:'y',plugins:{legend:{display:false}}}});
+  $('funP').textContent='De '+fmt(f.consultas,0)+' consultas, '+fmt(f.estudios,0)+' completaron estudios ('+fmt(100*f.estudios/f.consultas,0)+'%). Controles: '+fmt(100*f.control_6m/f.estudios,0)+'% a 6 meses y '+fmt(100*f.control_12m/f.estudios,0)+'% a 12 meses.';
+  mk('cDias',{type:'bar',data:{labels:['5–7','8–10','11–13','14–16','17–19','20–22','23–25'],datasets:[{data:o.hist_e_i,backgroundColor:css('--s3')}]},options:{plugins:{legend:{display:false}},scales:{x:{title:{display:true,text:'Días'}}}}});
+  $('diasP').textContent='Mediana: '+fmt(o.med_consulta_estudios,0)+' días de la consulta a los estudios y '+fmt(o.med_estudios_integracion,0)+' días de los estudios a la consulta de integración.';
+  mk('cRet',{type:'bar',data:{labels:['Alta','Media','Baja'].map(a=>'Adherencia '+a.toLowerCase()),datasets:[{label:'A 6 meses',data:['Alta','Media','Baja'].map(a=>o.retencion_adh[a].r6),backgroundColor:css('--s3')},{label:'A 12 meses',data:['Alta','Media','Baja'].map(a=>o.retencion_adh[a].r12),backgroundColor:css('--s2')}]},options:{plugins:{legend:{position:'bottom'}},scales:{y:{min:0,max:100,title:{display:true,text:'% con control'}}}}});
+  $('cobert').innerHTML=`<p>Cobertura media de las preguntas clave de la anamnesis: <b>${fmt(o.cobertura_media,0)}%</b>. El ${fmt(o.cobertura_lt80,0)}% de los pacientes quedó por debajo de 80%.</p><p>Retención a 12 meses: BASE ${fmt(o.retencion_12m.BASE,0)}% · PRO ${fmt(o.retencion_12m.PRO,0)}%. Pacientes: BASE ${fmt(o.n_programa.BASE,0)} · PRO ${fmt(o.n_programa.PRO,0)}.</p><p class="small">Una cobertura baja avisa qué preguntas se están saltando antes de analizar nada.</p>`;
+  $('ctx').innerHTML='<h3>Contexto de Argentina (fuentes públicas)</h3>'+CTX.items.map(i=>`<p><b>${i.titulo}</b> ${i.texto} <a href="${i.url}" target="_blank" rel="noopener">${i.fuente}</a></p>`).join('')+`<div class="note" style="margin-top:6px">${CTX.aviso}</div>`;
+}
+
+/* ---------- Paciente ---------- */
+function paciente(){
+  const sel=$('sel');
+  if(!sel.options.length){D.pacientes.forEach((p,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${p.id} · ${p.programa} · ${p.protocolo}`;sel.appendChild(o)});sel.onchange=()=>showPat(+sel.value)}
+  showPat(+sel.value||0);
+}
+function showPat(i){
+  const p=D.pacientes[i],v=p.visitas,f=v[0],l=v[v.length-1],ex=p.base;
+  const ch=a=>a.length?a.map(x=>`<span class="chip">${x}</span>`).join(''):'<span class="small">ninguno</span>';
+  $('pInfo').innerHTML=`<h3>${p.id} · ${p.sexo==='F'?'Mujer':'Hombre'}, ${fmt(p.edad,0)} años · programa ${p.programa}</h3>
+   <p>Protocolo: <b>${p.protocolo}</b> · Adherencia: <b>${p.adherencia}</b> · Segmento inicial: <b>${p.segmento}</b></p>
+   <p>Hallazgo personalizado: <b>${p.hallazgo}</b></p><p>Intolerancias detectadas: ${ch(p.intol)}</p><p>Antecedentes familiares: ${ch(p.familia)}</p>
+   <p>Ritmo de envejecimiento estimado: <b>${fmt(p.ritmo,2)}</b> años biológicos por año real</p>`;
+  const tl=[...p.eventos.map(e=>({k:e.match(/\((\d{4})\)/)?e.match(/\((\d{4})\)/)[1]:'antes',t:e.replace(/\s*\(\d{4}\)/,'')})).sort((a,b)=>a.k-b.k),{k:'Mes 0',t:'Consulta integral y estudios (D-ROMs, PIC, Oligoscan, laboratorio'+(p.programa==='PRO'?', ADN Test':'')+')'}];
+  v.slice(1).forEach(x=>tl.push({k:'Mes '+fmt(x.mes,0),t:'Control: Score de Longevidad '+fmt(x.longevidad,0)+', brecha '+sgn(x.brecha,1)+' años'}));
+  $('pTL').innerHTML='<div class="timeline">'+tl.map(x=>`<div><b>${x.k}</b> · ${x.t}</div>`).join('')+'</div>'+(p.eventos.length?'':'<p class="small">Sin cirugías, internaciones ni diagnósticos previos registrados.</p>');
+  if(patChart){patChart.destroy();charts=charts.filter(c=>c!==patChart)}
+  patChart=mk('cPat',{type:'line',data:{labels:v.map(x=>fmt(x.mes,0)+' m'),datasets:[{label:'Edad biológica (parte modificable)',data:v.map(x=>x.bio),borderColor:css('--s6'),backgroundColor:css('--s6'),tension:.2,pointRadius:4},{label:'Edad cronológica',data:v.map(x=>x.cron),borderColor:css('--mut'),borderDash:[5,4],pointRadius:3}]},options:{plugins:{legend:{position:'bottom'}}}});
+  const d=l.brecha-f.brecha;
+  $('pMsg').innerHTML=`Brecha modificable: <b>${sgn(f.brecha,1)}</b> años al inicio y <b>${sgn(l.brecha,1)}</b> en el último control (${sgn(d,1)}). ${d<=-0.5?'Mejora su edad biológica relativa.':d>=0.5?'Su edad biológica relativa empeoró.':'Sin cambios relevantes.'}`;
+  if(p.programa==='PRO'){const tot=l.brecha+p.gen;$('pGen').innerHTML=`<h3>Genética fija y parte modificable</h3><p>La genética (ADN Test, solo programa PRO) aporta <b>${sgn(p.gen,1)}</b> años y no cambia con los hábitos. La parte modificable pasó de <b>${sgn(f.brecha,1)}</b> a <b>${sgn(l.brecha,1)}</b>. Brecha total en el último control: <b>${sgn(tot,1)}</b> años.</p><p>${[['APOE',p.genetica.apoe],['MTHFR',p.genetica.mthfr],['FTO',p.genetica.fto+' alelo(s) de riesgo'],['ACE',p.genetica.ace],['LCT',p.genetica.lct],['HLA DQ2/DQ8',p.genetica.hla?'positivo':'negativo'],['VDR',p.genetica.vdr],['CYP1A2',p.genetica.cyp],['GSTT1',p.genetica.gstt1]].map(x=>`<span class="chip">${x[0]}: ${x[1]}</span>`).join('')}</p><p class="small">Genotipos y pesos ficticios. “Fijo” no es destino: marca el riesgo, y los hábitos influyen en cómo se expresa.</p>`}
+  else $('pGen').innerHTML='<h3>Genética</h3><p>Este paciente está en programa BASE: no incluye ADN Test, así que el componente genético no se calcula. Solo se ve la parte modificable de su brecha.</p>';
+  $('tSem').innerHTML='<tr><th>Área</th>'+v.map(x=>`<th>${fmt(x.mes,0)} m</th>`).join('')+'</tr>'+DOMS.map(dm=>`<tr><td>${dm}</td>${v.map(x=>`<td>${pill(x.scores[dm])}</td>`).join('')}</tr>`).join('')+`<tr><td><b>Score de Longevidad</b></td>${v.map(x=>`<td>${pill(x.longevidad)}</td>`).join('')}</tr>`;
+  const rows=[['D-ROMs (U.CARR)','drom',0],['PIC (índice)*','pic',0],['PCR-us (mg/L)','pcr',2],['Glucosa (mg/dL)','glu',0],['Insulina (µU/mL)','ins',1],['HOMA-IR','homa',2],['LDL (mg/dL)','ldl',0],['VO2 máx','vo2',1],['Carga de metales (idx)','metales',2]];
+  const T=(rs)=>'<tr><th>Marcador</th>'+v.map(x=>`<th>${fmt(x.mes,0)} m</th>`).join('')+'</tr>'+rs.map(r=>`<tr><td>${r[0]}</td>${v.map(x=>`<td>${fmt(x[r[1]],r[2])}</td>`).join('')}</tr>`).join('');
+  $('tMk').innerHTML=T(rows);
+  $('tHab').innerHTML=T([['Celular en la cama (1 = sí)','celu',0],['Ultraprocesados por semana','ult',0],['Sesiones de fuerza por semana','fuerza',0],['Estrés percibido','estres',1],['Ansiedad','ansiedad',1],['Calidad de sueño','sueno_cal',1]]);
+  $('tSin').innerHTML=T([['Energía','energia',1],['Claridad mental','claridad',1],['Dolor','dolor',1],['Molestias digestivas','digest',1]]);
+  $('tCond').innerHTML='<tr><th>Mes</th><th>Padecimientos</th><th>Alerta metabólica</th></tr>'+v.map(x=>`<tr><td>${fmt(x.mes,0)}</td><td class="wrapc">${x.cond.length?x.cond.join(', '):'ninguno'}</td><td>${x.alerta?'<span class="pill warn">sí</span>':'no'}</td></tr>`).join('');
+  const I=p.informe;
+  $('pInf').innerHTML=`<h3>Informe de integración (borrador para el médico)</h3><p>Resumen de una página que se arma solo antes de la consulta de integración. El médico lo revisa y decide.</p>
+   <p><b>Áreas con menor score:</b> ${ch(I.prioridades)}</p><p><b>Hábitos para conversar:</b> ${ch(I.habitos)}</p><p><b>Padecimientos detectados:</b> ${ch(I.padecimientos)}</p>
+   <p><b>Genética para evaluar (solo PRO):</b> ${ch(I.genetica)}</p><p><b>Hallazgo personalizado:</b> ${I.hallazgo}</p>`;
+  const li=a=>a.length?a.map(x=>`<li>${x.v} (${sgn(x.a,2)} años)</li>`).join(''):'<li>Sin factores destacados</li>';
+  $('up').innerHTML=li(p.up);$('dn').innerHTML=li(p.dn);
+}
+
+/* ---------- Edad biológica ---------- */
+function edad(){
+  const c1=css('--s3');
+  mk('cScatter',{type:'scatter',data:{datasets:[{label:'Pacientes',data:D.scatter.map(p=>({x:p.c,y:p.b})),pointRadius:2.5,backgroundColor:c1+'99'},{label:'Edad biológica = cronológica',type:'line',data:[{x:25,y:25},{x:85,y:85}],borderColor:css('--mut'),borderDash:[5,4],pointRadius:0,borderWidth:1.5}]},options:{scales:{x:{title:{display:true,text:'Edad cronológica'},min:25,max:85},y:{title:{display:true,text:'Edad biológica'},min:20,max:90}},plugins:{legend:{display:false}}}});
+  const labels=[];for(let i=-10;i<10;i++)labels.push(i+'');
+  mk('cHist',{type:'bar',data:{labels,datasets:[{label:'Mujeres',data:D.hist.F,backgroundColor:css('--s5')},{label:'Hombres',data:D.hist.M,backgroundColor:css('--s2')}]},options:{plugins:{legend:{position:'bottom'}},scales:{x:{ticks:{maxTicksLimit:7}}}}});
+  mk('cImp',{type:'bar',data:{labels:D.importancia.map(x=>x.variable),datasets:[{data:D.importancia.map(x=>x.valor),backgroundColor:css('--s2')}]},options:{indexAxis:'y',plugins:{legend:{display:false}}}});
+  const g=D.gen,gl=['-1,5','-1','-0,5','0','0,5','1','1,5','2','2,5'];
+  $('genCard').innerHTML=`<h3>Genética fija vs. parte modificable (programa PRO, ${fmt(g.n_pro,0)} pacientes)</h3>
+   <p>Entre quienes se hicieron el ADN Test, la genética aporta en promedio <b>${sgn(g.gen,2)}</b> años y la parte modificable <b>${sgn(g.mod0,2)}</b>. El ${fmt(g.pct_gen_positiva,0)}% tiene un aporte genético mayor a 0,5 años.</p>
+   <div class="chart short"><canvas id="cGen"></canvas></div>
+   <p>A los 12 meses, con plan, la parte modificable pasa a <b>${sgn(g.mod12_plan,2)}</b> y la genética sigue en <b>${sgn(g.gen12_plan,2)}</b>. Con seguimiento estándar la parte modificable es <b>${sgn(g.mod12_control,2)}</b>.</p>
+   <p class="small">Mensaje para el paciente: esto no cambia, esto sí. Los pesos genéticos son reglas de ejemplo editables, con variantes ficticias.</p>`;
+  mk('cGen',{type:'bar',data:{labels:gl.slice(0,g.hist.length),datasets:[{label:'Genética (fija)',data:g.hist,backgroundColor:css('--s4')},{label:'Modificable',data:g.mod_hist,backgroundColor:css('--s2')}]},options:{plugins:{legend:{position:'bottom'}},scales:{x:{title:{display:true,text:'Años de brecha (desde el valor indicado)'}}}}});
+  const A=D.relojes.A,B=D.relojes.B;
+  $('valid').innerHTML=`<h3>Cómo se validó</h3>
+   <p><b>Reloj A:</b> solo predice la edad cronológica. Su brecha se parece poco a la brecha simulada (correlación ${fmt(A.corr_brecha,2)}). Predecir la edad del calendario no alcanza para medir el envejecimiento biológico.</p>
+   <p><b>Reloj B (el que se usa acá):</b> se calibra con un test de referencia simulado en el 25% de los pacientes (${fmt(B.n_ref,0)} personas) y se aplica al resto. En pacientes no vistos la correlación con la brecha simulada es ${fmt(B.corr_no_vistos,2)} y el error medio ${fmt(B.mae_no_vistos,2)} años.</p>
+   <div class="note">Con datos sintéticos el ajuste es muy alto porque el simulador es simple; con datos reales será más bajo. Se demuestra el procedimiento: calibración, validación por paciente e incertidumbre. No es un reloj epigenético: no usa metilación del ADN.</div>`;
+}
+
+/* ---------- Segmentos ---------- */
+function seg(){
+  const P=pal(),names=D.segmentos.map(s=>s.nombre),col={};names.forEach((n,i)=>col[n]=P[(i+1)%6]);
+  mk('cPca',{type:'scatter',data:{datasets:names.map(n=>({label:n,data:D.pca.filter(p=>p.c===n).map(p=>({x:p.x,y:p.y})),pointRadius:3,backgroundColor:col[n]+'99'}))},options:{plugins:{legend:{position:'bottom'}},scales:{x:{title:{display:true,text:'Componente 1'}},y:{title:{display:true,text:'Componente 2'}}}}});
+  $('segCards').innerHTML=D.segmentos.map(s=>`<div class="card"><h3><span style="color:${col[s.nombre]}">●</span> ${s.nombre} <span class="small">· ${fmt(s.n,0)} pacientes · ${fmt(s.pct_pro,0)}% PRO · brecha media ${sgn(s.brecha,1)} años</span></h3>
+    ${DOMS.map(d=>`<div class="small">${d}: <b>${fmt(s.scores[d],0)}</b></div><div class="bar"><i style="width:${s.scores[d]}%;background:${col[s.nombre]}"></i></div>`).join('')}
+    <p><b>Roadmap sugerido (para revisión médica)</b></p><ul><li><b>Nutrición:</b> ${s.roadmap.nutricion}</li><li><b>Entrenamiento:</b> ${s.roadmap.entrenamiento}</li><li><b>Suplementación:</b> ${s.roadmap.suplementacion}</li></ul></div>`).join('');
+  $('segNote').innerHTML=`Se probó K-Means con 3 a 7 grupos y se eligió K=${D.K} por silhouette (${fmt(D.silhouette[D.K],2)}). La separación es baja: los pacientes forman un continuo, así que los segmentos son una partición operativa y no grupos naturales. Las reglas del roadmap son una tabla editable por el equipo médico, no una decisión automática. Cada paciente además tiene su informe de integración con hábitos, genética y padecimientos.`;
+}
+
+/* ---------- Prevención ---------- */
+function prev(){
+  const P=pal();
+  mk('cTrend',{type:'line',data:{labels:['Inicio','6 meses','12 meses'],datasets:D.trend.map((t,i)=>({label:t.protocolo,data:t.pts.map(p=>p&&p.m),borderColor:P[i],backgroundColor:P[i],tension:.25,pointRadius:3,borderWidth:i===0?2.5:2,borderDash:i===0?[6,4]:[]}))},options:{plugins:{legend:{position:'bottom',labels:{boxWidth:10}}},scales:{y:{title:{display:true,text:'Brecha media (años)'}}}}});
+  $('tProto').innerHTML=tbl(['Protocolo','n','Δ brecha 12 m (IC 95%)','Resp. 6 m','Resp. 12 m','Ritmo','Δ Longevidad 12 m'],D.proto.map(p=>[p.protocolo,fmt(p.n,0),ciTxt(p.d12),p.r6?fmt(p.r6.r,0)+'%':'–',p.r12?fmt(p.r12.r,0)+'%':'–',p.ritmo?fmt(p.ritmo.m,2):'–',p.longevidad12?sgn(p.longevidad12.m,1):'–']));
+  mk('cLong',{type:'line',data:{labels:['Inicio','6 meses','12 meses'],datasets:[{label:'Con plan preventivo',data:D.long_trend.plan,borderColor:css('--s2'),backgroundColor:css('--s2'),tension:.25,pointRadius:4},{label:'Seguimiento estándar',data:D.long_trend.control,borderColor:css('--s1'),backgroundColor:css('--s1'),borderDash:[6,4],tension:.25,pointRadius:4}]},options:{plugins:{legend:{position:'bottom'}},scales:{y:{title:{display:true,text:'Score de Longevidad (0 a 100)'}}}}});
+  mk('cAdh',{type:'bar',data:{labels:D.adh.map(a=>'Adherencia '+a.adherencia.toLowerCase()),datasets:[{data:D.adh.map(a=>a.ritmo.m),backgroundColor:[css('--ok'),css('--warn'),css('--bad')]}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,title:{display:true,text:'Años biológicos por año real'}}}}});
+  mk('cDom',{type:'bar',data:{labels:DOMS.map(d=>SH[d]||d),datasets:[{label:'Con plan',data:DOMS.map(d=>D.dom_delta['12m'][d].plan),backgroundColor:css('--s2')},{label:'Seguimiento estándar',data:DOMS.map(d=>D.dom_delta['12m'][d].control),backgroundColor:css('--s1')}]},options:{plugins:{legend:{position:'bottom'}},scales:{x:{ticks:{maxRotation:40,minRotation:25}}}}});
+  $('tHabP').innerHTML=tbl(['Protocolo','Ultraproc.','Fuerza','Estrés','Sueño','Celular','Dieta med.'],D.habitos.map(h=>[h.protocolo,sgn(h.ultraprocesados_sem,1),sgn(h.sesiones_fuerza_sem,1),sgn(h.estres_percibido,1),sgn(h.calidad_sueno,1),sgn(h.celular_en_cama,2),sgn(h.dieta_mediterranea_score,1)]));
+  const sy=[['energia','Energía'],['claridad_mental','Claridad mental'],['dolor','Dolor'],['molestias_digestivas','Molestias digestivas']];
+  mk('cSin',{type:'bar',data:{labels:D.sintomas.map(s=>s.protocolo),datasets:sy.map((x,i)=>({label:x[1],data:D.sintomas.map(s=>s[x[0]]?s[x[0]].m:null),backgroundColor:[P[1],P[2],P[3],P[4]][i]}))},options:{plugins:{legend:{position:'bottom'}},scales:{x:{ticks:{maxRotation:35,minRotation:20}}}}});
+  const hg=D.hallazgo.gluten,hl=D.hallazgo.lactosa;
+  $('hall').innerHTML=`<h3>Saber qué cambiar</h3><p>Pacientes con intolerancia real, según se haya detectado y se haya armado un plan. Cambio a 12 meses en la escala 0 a 10 (bajar es mejorar).</p>
+   <table>${tbl(['Intolerancia y grupo','n','Δ a 12 m (IC 95%)'],[...hg.map(x=>['Gluten · dolor · '+x.grupo.toLowerCase(),x.dolor12?fmt(x.dolor12.n,0):'–',ciTxt(x.dolor12)]),...hl.map(x=>['Lactosa · molestias digestivas · '+x.grupo.toLowerCase(),x.dig12?fmt(x.dig12.n,0):'–',ciTxt(x.dig12)])])}</table>
+   <p class="small">Solo se puede mirar así en una simulación, donde se conoce la intolerancia real. El grupo con plan también cambia otros hábitos, así que parte de la diferencia viene de ahí. La idea: un diagnóstico más específico permite un cambio de hábitos más específico.</p>`;
+  const sA=D['señal']['con alerta'],sB=D['señal']['sin alerta'];
+  $('senal').innerHTML=`<h3>Señal temprana metabólica</h3><p>Alerta: HOMA-IR sube 0,4 o más entre controles mientras la glucosa (menos de 100) y la HbA1c (menos de 5,7) siguen normales. Resultado: pacientes con criterio de prediabetes en el control siguiente.</p>
+   <table>${tbl(['Grupo','n','% con prediabetes'],[['Con alerta',fmt(sA.n,0),fmt(sA.pct,1)+'%'],['Sin alerta',fmt(sB.n,0),fmt(sB.pct,1)+'%']])}</table>
+   <p class="small">Pocos casos con alerta: la diferencia tiene mucha incertidumbre. Los umbrales son de ejemplo, los definiría el equipo médico.</p>`;
+  $('tCondP').innerHTML=tbl(['Padecimiento','Inicio','Plan 0→12 m','Control 0→12 m'],D.condiciones.map(c=>[c.condicion,fmt(c.baseline,1)+'%',fmt(c.plan_0,1)+'% → '+fmt(c.plan_12,1)+'%',fmt(c.control_0,1)+'% → '+fmt(c.control_12,1)+'%']));
+  $('tEv').innerHTML=tbl(['Eventos previos','n','Brecha inicial','Padecimientos'],D.eventos.map(e=>[e.grupo,fmt(e.n,0),sgn(e.brecha,2),fmt(e.condiciones,2)]));
+  $('prevNote').innerHTML='<b>Cómo leerlo:</b> el seguimiento estándar sirve de comparación. Con plan mejoran los hábitos, los síntomas y la edad biológica relativa, en proporción a la adherencia. Con datos reales de una clínica esto se haría con un diseño que controle por edad, sexo y motivo de consulta, porque en la práctica el plan no se asigna al azar.';
+}
+
+/* ---------- Simulador ---------- */
+function sim(){
+  const S=D.simulador;
+  if(!$('sPac').options.length){
+    D.pacientes.forEach((p,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${p.id} · ${p.programa} · ${fmt(p.edad,0)} años`;$('sPac').appendChild(o)});
+    Object.keys(S.effect).filter(k=>k!=='Seguimiento estándar').forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k;$('sProto').appendChild(o)});
+    $('sProto').value='Combinado integral';['sPac','sProto','sAdh','sMes','sRit'].forEach(id=>$(id).addEventListener('input',runSim));
+  }
+  runSim();
+}
+function simAt(p,proto,adh,rit,m){
+  const S=D.simulador,e=S.effect[proto],hw=S.habw[proto],dr=S.drift[rit],tau=S.ramp_tau,ramp=(1-Math.exp(-m/tau))/(1-Math.exp(-12/tau)),y=m/12,phi=adh*ramp;
+  const dz=[dr*y+e[0]*phi,dr*y+e[1]*phi,dr*y+e[2]*phi,0.4*dr*y+e[3]*phi,-dr*y+e[4]*phi];
+  const gap=p.base.brecha+S.gapk*S.gapw.reduce((a,w,i)=>a+w*dz[i],0);
+  const sc={};DOMS.forEach((d,i)=>sc[d]=clip(p.base.scores[d]+S.slopes[i]*dz[i],0,100));
+  const mean=DOMS.reduce((a,d)=>a+sc[d],0)/DOMS.length,lw=S.long_w;
+  const lon=clip(lw.dominios*mean+lw.brecha*clip(50-lw.pendiente_brecha*gap,0,100),0,100);
+  const nut=hw[0]*phi,ent=hw[1]*phi,sue=hw[2]*phi;
+  return {gap,sc,lon,ult:p.base.ult*(1-0.5*nut),fuerza:p.base.fuerza+2*ent,estres:clip(p.base.estres-1.8*sue-0.4*ent,0,10),sueno:clip(p.base.sueno+1.8*sue,0,10)};
+}
+function runSim(){
+  const p=D.pacientes[+$('sPac').value||0],proto=$('sProto').value,adh=+$('sAdh').value/100,rit=$('sRit').value,m=+$('sMes').value;
+  $('sAdhV').textContent=fmt(adh*100,0)+'%';$('sMesV').textContent=m+' meses';
+  const ms=[0,1,2,3,4,5,6,7,8,9,10,11,12],a=ms.map(x=>simAt(p,proto,adh,rit,x)),b=ms.map(x=>simAt(p,'Seguimiento estándar',adh,rit,x));
+  if(simChart){simChart.destroy();charts=charts.filter(c=>c!==simChart)}
+  const ds=[{label:'Con el plan elegido',data:a.map(x=>x.gap),borderColor:css('--s2'),backgroundColor:css('--s2'),tension:.25,pointRadius:0,borderWidth:2.5},{label:'Sin plan (seguimiento estándar)',data:b.map(x=>x.gap),borderColor:css('--s1'),borderDash:[6,4],tension:.25,pointRadius:0}];
+  if(p.programa==='PRO')ds.push({label:'Con plan + genética fija',data:a.map(x=>x.gap+p.gen),borderColor:css('--s4'),borderDash:[2,3],tension:.25,pointRadius:0});
+  simChart=mk('cSim',{type:'line',data:{labels:ms.map(x=>x+' m'),datasets:ds},options:{plugins:{legend:{position:'bottom',labels:{boxWidth:10}}},scales:{y:{title:{display:true,text:'Brecha de edad (años)'}},x:{ticks:{maxTicksLimit:7}}}}});
+  const A=a[m],B=b[m];
+  $('simMsg').innerHTML=`A los ${m} meses: brecha modificable <b>${sgn(A.gap,1)}</b> años con el plan y <b>${sgn(B.gap,1)}</b> sin plan.`+(p.programa==='PRO'?` La genética fija (${sgn(p.gen,1)} años) no cambia.`:' Este paciente es programa BASE: no tiene componente genético.');
+  $('tSimD').innerHTML=tbl(['Área','Sin plan','Con plan'],[...DOMS.map(d=>[d,pill(B.sc[d]),pill(A.sc[d])]),['<b>Score de Longevidad</b>',pill(B.lon),pill(A.lon)]]);
+  $('tSimH').innerHTML=tbl(['Hábito','Inicio','Sin plan','Con plan'],[['Ultraprocesados por semana',fmt(p.base.ult,0),fmt(B.ult,1),fmt(A.ult,1)],['Sesiones de fuerza por semana',fmt(p.base.fuerza,0),fmt(B.fuerza,1),fmt(A.fuerza,1)],['Estrés percibido',fmt(p.base.estres,1),fmt(B.estres,1),fmt(A.estres,1)],['Calidad de sueño',fmt(p.base.sueno,1),fmt(B.sueno,1),fmt(A.sueno,1)]]);
+}
+
+const RENDER={resumen,datos,pac:paciente,edad,seg,prev,sim};
+function show(t){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t));
+  if(!inited[t]){defaults();RENDER[t]();inited[t]=true}
+  window.scrollTo(0,0);
+}
+$('tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b)show(b.dataset.t)});
+const mq=window.matchMedia('(prefers-color-scheme: dark)');
+mq.addEventListener&&mq.addEventListener('change',()=>{const cur=document.querySelector('nav button.on').dataset.t;charts.forEach(c=>c.destroy());charts=[];patChart=null;simChart=null;inited={};show(cur)});
+show('resumen');
+</script>

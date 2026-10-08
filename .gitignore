@@ -1,0 +1,11 @@
+superset/.venv/
+superset/.env
+superset/superset.log
+*.db
+__pycache__/
+*.pyc
+.venv-datos/
+# se regeneran con ./ejecutar_todo.sh (semilla fija)
+bi/
+datos/
+resultados/

@@ -1,0 +1,19 @@
+# Alternativa sin instalar Python: docker compose up -d   (no probado en este entorno)
+# Después, una sola vez:
+#   docker compose exec superset superset db upgrade
+#   docker compose exec superset superset fab create-admin --username admin --firstname Admin --lastname Local --email admin@local.test --password "$SUPERSET_ADMIN_PASSWORD"
+#   docker compose exec superset superset init
+# Y para cargar el tablero:  DB_PATH=/data/estudio_longevidad.sqlite python3 configurar_dashboard.py
+services:
+  superset:
+    image: apache/superset:latest
+    ports: ["8088:8088"]
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+    volumes:
+      - ./superset_config.py:/app/pythonpath/superset_config.py
+      - ../bi:/data
+      - superset_home:/app/superset_home
+volumes:
+  superset_home:
