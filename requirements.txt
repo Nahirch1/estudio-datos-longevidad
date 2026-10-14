@@ -6,3 +6,4 @@ xlsxwriter
 pdfplumber
 streamlit
 plotly
+reportlab

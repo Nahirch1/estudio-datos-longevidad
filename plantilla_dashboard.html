@@ -61,12 +61,12 @@ footer{color:var(--mut);font-size:12px;padding-block:16px 24px}
 <div class="wrap">
 <header>
   <h1>Estudio de Datos de Longevidad</h1>
-  <div class="sub">Demo de analítica longitudinal inspirada en una clínica de medicina preventiva y longevidad · 8.000 pacientes · visitas a 0, 6 y 12 meses</div>
+  <div class="sub">Demo de analítica longitudinal inspirada en una clínica de medicina preventiva y longevidad · 42.000 pacientes · visitas a 0, 6 y 12 meses</div>
   <span class="tag">Datos 100% sintéticos · apoyo a la decisión médica, no diagnóstico</span>
 </header>
 <nav id="tabs">
   <button data-t="resumen" class="on">Resumen</button><button data-t="datos">Datos y operación</button><button data-t="pac">Paciente</button>
-  <button data-t="edad">Edad biológica</button><button data-t="seg">Segmentos</button><button data-t="prev">Prevención</button><button data-t="sim">Simulador</button>
+  <button data-t="edad">Edad biológica</button><button data-t="labgen">Laboratorio y genética</button><button data-t="seg">Segmentos</button><button data-t="prev">Prevención</button><button data-t="sim">Simulador</button>
 </nav>
 
 <section id="resumen" class="on">
@@ -133,6 +133,24 @@ footer{color:var(--mut);font-size:12px;padding-block:16px 24px}
     </div>
     <div class="card" id="genCard"></div>
     <div class="card" id="valid"></div>
+  </div>
+</section>
+
+<section id="labgen">
+  <div class="stack">
+    <div class="card" id="labCard"></div>
+    <div class="grid two">
+      <div class="card"><h3>Insulina en ayunas vs. post-carga</h3><p>Mediana por protocolo, al inicio y a los 12 meses (µU/mL). Solo entre quienes tienen la medición.</p><div class="chart"><canvas id="cIns"></canvas></div></div>
+      <div class="card" id="insCard"></div>
+    </div>
+    <div class="card"><h3>Panel genético ampliado (programa PRO)</h3><div id="genPanelP"></div>
+      <div class="chart tall"><canvas id="cGenR"></canvas></div></div>
+    <div class="card"><h3>Genotipo y biomarcador</h3><p>Media del biomarcador relacionado en cada genotipo, en la visita inicial. Los genotipos van del 0 al 2 alelos de efecto.</p><div class="tw"><table id="tGenA"></table></div></div>
+    <div class="grid two">
+      <div class="card"><h3>HFE y ferritina</h3><div class="tw"><table id="tHfe"></table></div></div>
+      <div class="card"><h3>Marcadores clásicos</h3><div class="tw"><table id="tCla"></table></div></div>
+    </div>
+    <div class="note">Todas las asociaciones salen de parámetros que cargué en el simulador. Muestran cómo se leería el panel con datos reales; no son evidencia clínica y no reemplazan el consejo genético.</div>
   </div>
 </section>
 
@@ -277,10 +295,10 @@ function showPat(i){
   patChart=mk('cPat',{type:'line',data:{labels:v.map(x=>fmt(x.mes,0)+' m'),datasets:[{label:'Edad biológica (parte modificable)',data:v.map(x=>x.bio),borderColor:css('--s6'),backgroundColor:css('--s6'),tension:.2,pointRadius:4},{label:'Edad cronológica',data:v.map(x=>x.cron),borderColor:css('--mut'),borderDash:[5,4],pointRadius:3}]},options:{plugins:{legend:{position:'bottom'}}}});
   const d=l.brecha-f.brecha;
   $('pMsg').innerHTML=`Brecha modificable: <b>${sgn(f.brecha,1)}</b> años al inicio y <b>${sgn(l.brecha,1)}</b> en el último control (${sgn(d,1)}). ${d<=-0.5?'Mejora su edad biológica relativa.':d>=0.5?'Su edad biológica relativa empeoró.':'Sin cambios relevantes.'}`;
-  if(p.programa==='PRO'){const tot=l.brecha+p.gen;$('pGen').innerHTML=`<h3>Genética fija y parte modificable</h3><p>La genética (ADN Test, solo programa PRO) aporta <b>${sgn(p.gen,1)}</b> años y no cambia con los hábitos. La parte modificable pasó de <b>${sgn(f.brecha,1)}</b> a <b>${sgn(l.brecha,1)}</b>. Brecha total en el último control: <b>${sgn(tot,1)}</b> años.</p><p>${[['APOE',p.genetica.apoe],['MTHFR',p.genetica.mthfr],['FTO',p.genetica.fto+' alelo(s) de riesgo'],['ACE',p.genetica.ace],['LCT',p.genetica.lct],['HLA DQ2/DQ8',p.genetica.hla?'positivo':'negativo'],['VDR',p.genetica.vdr],['CYP1A2',p.genetica.cyp],['GSTT1',p.genetica.gstt1]].map(x=>`<span class="chip">${x[0]}: ${x[1]}</span>`).join('')}</p><p class="small">Genotipos y pesos ficticios. “Fijo” no es destino: marca el riesgo, y los hábitos influyen en cómo se expresa.</p>`}
+  if(p.programa==='PRO'){const tot=l.brecha+p.gen;$('pGen').innerHTML=`<h3>Genética fija y parte modificable</h3><p>La genética (ADN Test, solo programa PRO) aporta <b>${sgn(p.gen,1)}</b> años y no cambia con los hábitos. La parte modificable pasó de <b>${sgn(f.brecha,1)}</b> a <b>${sgn(l.brecha,1)}</b>. Brecha total en el último control: <b>${sgn(tot,1)}</b> años.</p><p>${[['APOE',p.genetica.apoe],['MTHFR',p.genetica.mthfr],['FTO',p.genetica.fto+' alelo(s) de riesgo'],['ACE',p.genetica.ace],['LCT',p.genetica.lct],['HLA DQ2/DQ8',p.genetica.hla?'positivo':'negativo'],['VDR',p.genetica.vdr],['CYP1A2',p.genetica.cyp],['GSTT1',p.genetica.gstt1],['HFE',p.genetica.hfe]].map(x=>`<span class="chip">${x[0]}: ${x[1]}</span>`).join('')}</p><p class="small">Panel completo: ${Object.entries(p.genetica.panel).map(e=>`${e[0]} ${e[1]}`).join(' · ')}.</p><p class="small">Genotipos y pesos ficticios. “Fijo” no es destino: marca el riesgo, y los hábitos influyen en cómo se expresa.</p>`}
   else $('pGen').innerHTML='<h3>Genética</h3><p>Este paciente está en programa BASE: no incluye ADN Test, así que el componente genético no se calcula. Solo se ve la parte modificable de su brecha.</p>';
   $('tSem').innerHTML='<tr><th>Área</th>'+v.map(x=>`<th>${fmt(x.mes,0)} m</th>`).join('')+'</tr>'+DOMS.map(dm=>`<tr><td>${dm}</td>${v.map(x=>`<td>${pill(x.scores[dm])}</td>`).join('')}</tr>`).join('')+`<tr><td><b>Score de Longevidad</b></td>${v.map(x=>`<td>${pill(x.longevidad)}</td>`).join('')}</tr>`;
-  const rows=[['D-ROMs (U.CARR)','drom',0],['PIC (índice)*','pic',0],['PCR-us (mg/L)','pcr',2],['Glucosa (mg/dL)','glu',0],['Insulina (µU/mL)','ins',1],['HOMA-IR','homa',2],['LDL (mg/dL)','ldl',0],['VO2 máx','vo2',1],['Carga de metales (idx)','metales',2]];
+  const rows=[['D-ROMs (U.CARR)','drom',0],['PIC (índice)*','pic',0],['PCR-us (mg/L)','pcr',2],['Glucosa (mg/dL)','glu',0],['Insulina en ayunas (µU/mL)','ins',1],['Glucosa 2 h post carga (mg/dL)','glu_post',0],['Insulina 2 h post carga (µU/mL)','ins_post',1],['HOMA-IR','homa',2],['PhenoAge (años)','pheno',1],['LDL (mg/dL)','ldl',0],['VO2 máx','vo2',1],['Carga de metales (idx)','metales',2]];
   const T=(rs)=>'<tr><th>Marcador</th>'+v.map(x=>`<th>${fmt(x.mes,0)} m</th>`).join('')+'</tr>'+rs.map(r=>`<tr><td>${r[0]}</td>${v.map(x=>`<td>${fmt(x[r[1]],r[2])}</td>`).join('')}</tr>`).join('');
   $('tMk').innerHTML=T(rows);
   $('tHab').innerHTML=T([['Celular en la cama (1 = sí)','celu',0],['Ultraprocesados por semana','ult',0],['Sesiones de fuerza por semana','fuerza',0],['Estrés percibido','estres',1],['Ansiedad','ansiedad',1],['Calidad de sueño','sueno_cal',1]]);
@@ -308,10 +326,11 @@ function edad(){
    <p>A los 12 meses, con plan, la parte modificable pasa a <b>${sgn(g.mod12_plan,2)}</b> y la genética sigue en <b>${sgn(g.gen12_plan,2)}</b>. Con seguimiento estándar la parte modificable es <b>${sgn(g.mod12_control,2)}</b>.</p>
    <p class="small">Mensaje para el paciente: esto no cambia, esto sí. Los pesos genéticos son reglas de ejemplo editables, con variantes ficticias.</p>`;
   mk('cGen',{type:'bar',data:{labels:gl.slice(0,g.hist.length),datasets:[{label:'Genética (fija)',data:g.hist,backgroundColor:css('--s4')},{label:'Modificable',data:g.mod_hist,backgroundColor:css('--s2')}]},options:{plugins:{legend:{position:'bottom'}},scales:{x:{title:{display:true,text:'Años de brecha (desde el valor indicado)'}}}}});
-  const A=D.relojes.A,B=D.relojes.B;
+  const A=D.relojes.A,B=D.relojes.B,Cc=D.relojes.C;
   $('valid').innerHTML=`<h3>Cómo se validó</h3>
    <p><b>Reloj A:</b> solo predice la edad cronológica. Su brecha se parece poco a la brecha simulada (correlación ${fmt(A.corr_brecha,2)}). Predecir la edad del calendario no alcanza para medir el envejecimiento biológico.</p>
    <p><b>Reloj B (el que se usa acá):</b> se calibra con un test de referencia simulado en el 25% de los pacientes (${fmt(B.n_ref,0)} personas) y se aplica al resto. En pacientes no vistos la correlación con la brecha simulada es ${fmt(B.corr_no_vistos,2)} y el error medio ${fmt(B.mae_no_vistos,2)} años.</p>
+   <p><b>Reloj C (PhenoAge, Levine 2018):</b> fórmula publicada con 9 biomarcadores de rutina (albúmina, creatinina, glucosa, PCR, linfocitos, VCM, ADE, fosfatasa alcalina y leucocitos) más la edad, sin entrenar nada con estos datos. Su brecha, centrada en el promedio inicial de la cohorte (${fmt(Cc.sesgo_centrado,1)} años de desvío: el simulador genera valores más sanos que la población original), tiene correlación ${fmt(Cc.corr_brecha,2)} con la brecha simulada y ${fmt(Cc.corr_con_A,2)} con el reloj A. Esa correlación es en parte por construcción: el simulador mueve los mismos biomarcadores con los que PhenoAge calcula.</p>
    <div class="note">Con datos sintéticos el ajuste es muy alto porque el simulador es simple; con datos reales será más bajo. Se demuestra el procedimiento: calibración, validación por paciente e incertidumbre. No es un reloj epigenético: no usa metilación del ADN.</div>`;
 }
 
@@ -383,7 +402,24 @@ function runSim(){
   $('tSimH').innerHTML=tbl(['Hábito','Inicio','Sin plan','Con plan'],[['Ultraprocesados por semana',fmt(p.base.ult,0),fmt(B.ult,1),fmt(A.ult,1)],['Sesiones de fuerza por semana',fmt(p.base.fuerza,0),fmt(B.fuerza,1),fmt(A.fuerza,1)],['Estrés percibido',fmt(p.base.estres,1),fmt(B.estres,1),fmt(A.estres,1)],['Calidad de sueño',fmt(p.base.sueno,1),fmt(B.sueno,1),fmt(A.sueno,1)]]);
 }
 
-const RENDER={resumen,datos,pac:paciente,edad,seg,prev,sim};
+function labgen(){
+  const C=D.catalogo,I=D.insulina,G=D.gen_asoc;
+  $('labCard').innerHTML=`<h3>Laboratorio completo</h3>
+   <p>El panel cubre <b>${fmt(C.n_lab,0)} analitos</b> de laboratorio más ${fmt(C.n_derivados,0)} cálculos derivados (HOMA-IR, relación TG/HDL, colesterol no HDL, neutrófilos/linfocitos, insulina post-carga sobre ayunas), además de oligoelementos, D-ROMs, composición corporal y rendimiento. Incluye hemograma con fórmula leucocitaria, química, función hepática y renal (eGFR por CKD-EPI 2021), iones, tiroides, lípidos con ApoB y Lp(a), glucosa e insulina en ayunas y post-carga, y vitaminas. Cada analito se informa en la unidad y con el rango de referencia de cada laboratorio, y el pipeline los lleva a una sola unidad.</p>
+   <p class="small">El catálogo (${fmt(C.n_lab,0)} analitos) sigue los estudios habituales de una evaluación de longevidad. Todos los valores son ficticios.</p>`;
+  const P=D.insulina.por_protocolo;
+  mk('cIns',{type:'bar',data:{labels:P.map(x=>x.protocolo),datasets:[{label:'En ayunas, inicio',data:P.map(x=>x.ayunas0),backgroundColor:css('--s3')},{label:'En ayunas, 12 m',data:P.map(x=>x.ayunas12),backgroundColor:css('--s2')},{label:'Post-carga, inicio',data:P.map(x=>x.post0),backgroundColor:css('--s5')},{label:'Post-carga, 12 m',data:P.map(x=>x.post12),backgroundColor:css('--s4')}]},options:{plugins:{legend:{position:'bottom',labels:{boxWidth:10}}},scales:{x:{ticks:{maxRotation:40,autoSkip:false}}}}});
+  $('insCard').innerHTML=`<h3>Por qué medir las dos</h3>
+   <p>La insulina post-carga está en <b>${fmt(I.medido_pct['0m'],0)}%</b> de las visitas. Entre quienes tienen ambas mediciones y la insulina en ayunas dentro del rango (menos de 12 µU/mL), el <b>${fmt(I.ayunas_normal_hiperins_post_pct,1)}%</b> igual muestra hiperinsulinemia a las 2 horas: solo la curva con carga lo detecta. Mediana en ayunas ${fmt(I.ayunas_med,1)} y post-carga ${fmt(I.post_med,1)} (cociente típico ${fmt(I.ratio_med,1)}).</p>
+   <div class="note info"><b>Ojo con el sesgo:</b> la post-carga se pidió más cuando el HOMA-IR ya era alto (${fmt(I.medido_pct_homa_alto,0)}% de medición con HOMA-IR de 2,5 o más contra ${fmt(I.medido_pct_homa_normal,0)}% con HOMA-IR menor). Los datos faltantes no son al azar, así que no se imputan: se comparan solo los casos con las dos mediciones.</div>`;
+  $('genPanelP').innerHTML=`<p>El ADN Test tiene <b>${fmt(G.n_marcadores,0)} marcadores</b>: los clásicos (APOE, MTHFR C677T, FTO, ACE, LCT, HLA DQ2/DQ8, VDR, CYP1A2, GSTT1) más metilación (MTHFR A1298C), estrés (COMT), glucosa (TCF7L2, PPARG), lípidos (LPA, 9p21, CETP), antioxidantes (SOD2, GPX1), vitamina D (GC), peso (MC4R), rendimiento (ACTN3), cognición (BDNF), inflamación (IL6, TNF), longevidad (FOXO3), presión (NOS3), B12 (FUT2) y hierro (HFE). Dos puntajes de riesgo poligénico (metabólico y cardiovascular) combinan varios de ellos. La barra muestra cuánto se mueve el biomarcador relacionado por cada alelo de efecto (correlación).</p>`;
+  const S=G.snps.slice().sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+  mk('cGenR',{type:'bar',data:{labels:S.map(x=>x.gen+' → '+x.biomarcador),datasets:[{label:'Correlación genotipo–biomarcador',data:S.map(x=>x.r),backgroundColor:S.map(x=>x.r>=0?css('--s4'):css('--s2'))}]},options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{title:{display:true,text:'Correlación (r) por alelo de efecto'}}}}});
+  $('tGenA').innerHTML=tbl(['Marcador','Área','Biomarcador','Genotipo 0','Genotipo 1','Genotipo 2','r'],G.snps.map(x=>[`${x.gen}<br><span class="small">${x.rsid}</span>`,x.area,x.biomarcador,...[0,1,2].map(i=>`${x.genotipos[i]}: <b>${fmt(x.medias[i],1)}</b> <span class="small">(n=${fmt(x.n[i],0)})</span>`),fmt(x.r,2)]));
+  $('tHfe').innerHTML=tbl(['Variante','n','Ferritina (mediana, ng/mL)'],G.hfe.map(h=>[h.cat,fmt(h.n,0),fmt(h.ferritina,0)]));
+  $('tCla').innerHTML=tbl(['Grupo','n','Valor'],G.clasicos.map(c=>[c.homocisteina!=null?c.cat:('APOE e4 = '+c.cat),fmt(c.n,0),c.homocisteina!=null?('homocisteína '+fmt(c.homocisteina,1)+' µmol/L'):('LDL '+fmt(c.ldl,1)+' mg/dL')]));
+}
+const RENDER={resumen,datos,pac:paciente,edad,labgen,seg,prev,sim};
 function show(t){
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
   document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t));

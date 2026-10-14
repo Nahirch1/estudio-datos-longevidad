@@ -63,9 +63,29 @@ DATASETS = {
         FROM fact_resultado_paciente r JOIN dim_paciente p USING (patient_id) WHERE r.resp_6m IS NOT NULL GROUP BY 1""",
     'ritmo_por_adherencia': """SELECT p.adherencia AS adherencia, ROUND(AVG(r.ritmo_envejecimiento), 2) AS ritmo_envejecimiento
         FROM fact_resultado_paciente r JOIN dim_paciente p USING (patient_id) GROUP BY 1""",
-    'padecimientos': """SELECT c.condicion AS condicion, ROUND(100.0 * AVG(CASE WHEN v.visit_n = 0 THEN c.presente END), 1) AS pct_inicio,
-        ROUND(100.0 * AVG(CASE WHEN v.visit_n = 2 THEN c.presente END), 1) AS pct_12m
+    # fact_condicion guarda solo las condiciones presentes: el denominador es el total de visitas de cada hito
+    'padecimientos': """SELECT c.condicion AS condicion,
+        ROUND(100.0 * SUM(CASE WHEN v.visit_n = 0 THEN 1 ELSE 0 END) / (SELECT COUNT(*) FROM fact_visita WHERE visit_n = 0), 1) AS pct_inicio,
+        ROUND(100.0 * SUM(CASE WHEN v.visit_n = 2 THEN 1 ELSE 0 END) / (SELECT COUNT(*) FROM fact_visita WHERE visit_n = 2), 1) AS pct_12m
         FROM fact_condicion c JOIN fact_visita v USING (visit_id) GROUP BY 1 ORDER BY 2 DESC""",
+    'kpi_analitos': "SELECT COUNT(*) AS analitos FROM dim_biomarcador",
+    'kpi_marcadores_geneticos': "SELECT COUNT(*) AS marcadores FROM dim_marcador_genetico",
+    'insulina_ayunas_vs_post': """SELECT CASE v.visit_n WHEN 0 THEN 0 WHEN 1 THEN 6 ELSE 12 END AS mes, 'En ayunas' AS medicion, ROUND(AVG(l.insulina_ayunas), 1) AS insulina
+        FROM fact_laboratorio l JOIN fact_visita v USING (visit_id) GROUP BY 1
+        UNION ALL
+        SELECT CASE v.visit_n WHEN 0 THEN 0 WHEN 1 THEN 6 ELSE 12 END, 'Post-carga (2 h)', ROUND(AVG(l.insulina_post_carga), 1)
+        FROM fact_laboratorio l JOIN fact_visita v USING (visit_id) WHERE l.insulina_post_carga IS NOT NULL GROUP BY 1""",
+    'kpi_hiperinsulinemia_oculta': """SELECT ROUND(100.0 * SUM(CASE WHEN l.insulina_ayunas < 12 AND c.visit_id IS NOT NULL THEN 1 ELSE 0 END) / SUM(CASE WHEN l.insulina_ayunas < 12 THEN 1 ELSE 0 END), 1) AS pct_oculta
+        FROM fact_laboratorio l JOIN fact_visita v USING (visit_id)
+        LEFT JOIN fact_condicion c ON c.visit_id = l.visit_id AND c.condicion = 'hiperinsulinemia_postcarga'
+        WHERE v.visit_n = 0 AND l.insulina_post_carga IS NOT NULL""",
+    'relojes_por_hito': """SELECT CASE visit_n WHEN 0 THEN 0 WHEN 1 THEN 6 ELSE 12 END AS mes, 'Biomarcadores + hábitos' AS reloj, ROUND(AVG(brecha_modificable), 2) AS brecha FROM fact_visita GROUP BY 1
+        UNION ALL
+        SELECT CASE visit_n WHEN 0 THEN 0 WHEN 1 THEN 6 ELSE 12 END, 'PhenoAge (Levine 2018)', ROUND(AVG(brecha_phenoage), 2) FROM fact_visita GROUP BY 1""",
+    'lpa_por_genotipo': """SELECT g.lpa_rs10455872 AS genotipo, ROUND(AVG(l.lipoproteina_a), 1) AS lipoproteina_a_media
+        FROM dim_genetica_pro g JOIN fact_visita v ON v.patient_id = g.patient_id AND v.visit_n = 0 JOIN fact_laboratorio l ON l.visit_id = v.visit_id GROUP BY 1""",
+    'ferritina_por_hfe': """SELECT CASE g.hfe WHEN 'sin variantes' THEN '1 · ninguna' WHEN 'H63D portador' THEN '2 · H63D' WHEN 'C282Y portador' THEN '3 · C282Y' ELSE '4 · compuesto' END AS variante_hfe, ROUND(AVG(l.ferritina), 0) AS ferritina_media
+        FROM dim_genetica_pro g JOIN fact_visita v ON v.patient_id = g.patient_id AND v.visit_n = 0 JOIN fact_laboratorio l ON l.visit_id = v.visit_id GROUP BY 1""",
     'calidad_validacion': "SELECT grupo, comparados, correctos, exactitud FROM fact_calidad_validacion",
 }
 
@@ -80,7 +100,7 @@ def numero(ds, col, titulo, fmt=',.0f', sub=''):
 
 def tabla(ds, cols, titulo, fmt=None):
     p = {'query_mode': 'raw', 'all_columns': cols, 'row_limit': 1000, 'order_desc': False}
-    if fmt:
+    if fmt:  # formato numérico por columna (usa el separador argentino de superset_config.py)
         p['column_config'] = {c: {'d3NumberFormat': f} for c, f in fmt.items()}
     return dict(nombre=titulo, ds=ds, viz='table', p=p)
 
@@ -106,6 +126,13 @@ CHARTS = [
     barras('respondedores_6m', 'protocolo', 'pct_respondedores', '% de respondedores a 6 meses', horizontal=True),
     barras('ritmo_por_adherencia', 'adherencia', 'ritmo_envejecimiento', 'Ritmo de envejecimiento por adherencia'),
     tabla('padecimientos', ['condicion', 'pct_inicio', 'pct_12m'], 'Padecimientos: inicio vs. 12 meses (%)', {'pct_inicio': ',.1f', 'pct_12m': ',.1f'}),
+    numero('kpi_analitos', 'analitos', 'Analitos y mediciones por visita', ',.0f', 'analitos de laboratorio y otros estudios en el catálogo'),
+    numero('kpi_marcadores_geneticos', 'marcadores', 'Marcadores genéticos (PRO)', ',.0f', 'panel ficticio de variantes'),
+    numero('kpi_hiperinsulinemia_oculta', 'pct_oculta', 'Hiperinsulinemia post-carga con insulina en ayunas normal (%)', ',.1f', 'de quienes tienen las dos mediciones'),
+    barras('insulina_ayunas_vs_post', 'mes', 'insulina', 'Insulina media: ayunas vs. post-carga (µU/mL)', serie='medicion'),
+    lineas('relojes_por_hito', 'mes', 'brecha', 'reloj', 'Brecha de edad biológica: dos relojes'),
+    barras('lpa_por_genotipo', 'genotipo', 'lipoproteina_a_media', 'Lipoproteína (a) por genotipo LPA'),
+    barras('ferritina_por_hfe', 'variante_hfe', 'ferritina_media', 'Ferritina por variante HFE'),
     tabla('calidad_validacion', ['grupo', 'comparados', 'correctos', 'exactitud'], 'Validación de la limpieza de datos', {'comparados': ',d', 'correctos': ',d', 'exactitud': ',.1f'}),
 ]
 
@@ -116,6 +143,9 @@ FILAS = [
     (42, [('Embudo (simulado)', 4), ('Brecha modificable (años)', 4), ('% de respondedores a 6 meses', 4)]),
     (26, [('Plan vs. seguimiento estándar a 12 meses', 12)]),
     (42, [('Brecha media por protocolo', 6), ('Ritmo de envejecimiento por adherencia', 6)]),
+    (22, [('Analitos y mediciones por visita', 4), ('Marcadores genéticos (PRO)', 4), ('Hiperinsulinemia post-carga con insulina en ayunas normal (%)', 4)]),
+    (42, [('Insulina media: ayunas vs. post-carga (µU/mL)', 6), ('Brecha de edad biológica: dos relojes', 6)]),
+    (42, [('Lipoproteína (a) por genotipo LPA', 6), ('Ferritina por variante HFE', 6)]),
     (50, [('Padecimientos: inicio vs. 12 meses (%)', 6), ('Validación de la limpieza de datos', 6)]),
 ]
 
@@ -136,7 +166,7 @@ def disposicion_tablero(dash_id, ch_id):
     r = s.put(f'{URL}/api/v1/dashboard/{dash_id}', json={'position_json': json.dumps(pos)})
     if not r.ok:
         sys.exit(f'ERROR al ordenar el tablero: {r.status_code} {r.text[:600]}')
-    print('  tablero ordenado en 5 filas')
+    print(f'  tablero ordenado en {len(FILAS)} filas')
 
 
 def main():

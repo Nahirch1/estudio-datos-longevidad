@@ -1,7 +1,8 @@
 """
-04 · MODELOS Y ANÁLISIS SOBRE LA COHORTE LIMPIA (8.000 pacientes, 0/6/12 meses) — datos 100% sintéticos
+04 · MODELOS Y ANÁLISIS SOBRE LA COHORTE LIMPIA (42.000 pacientes, 0/6/12 meses) — datos 100% sintéticos
   1) Edad biológica por biomarcadores + hábitos (no es un reloj epigenético: no hay metilación)
        Reloj A: predice la edad cronológica (sin referencia)  ·  Reloj B: calibrado con una referencia simulada en el 25% de los pacientes
+       Reloj C: PhenoAge (Levine 2018), fórmula publicada con 9 biomarcadores de rutina + edad, sin entrenar nada
   2) Genética FIJA (solo programa PRO) vs componente MODIFIABLE de la brecha
   3) 5 scores por dominio + Score de Longevidad (pesos editables) + segmentos + borrador de informe de integración
   4) Longitudinal: ritmo de envejecimiento, respondedores, hábitos y síntomas, señales tempranas, padecimientos
@@ -12,13 +13,18 @@ import numpy as np, pandas as pd, json, os, warnings
 from sklearn.model_selection import GroupKFold, StratifiedKFold, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import ElasticNetCV, LinearRegression
 from sklearn.ensemble import HistGradientBoostingRegressor, HistGradientBoostingClassifier
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score, mean_absolute_error, roc_auc_score
 from sklearn.inspection import permutation_importance
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from catalogo import GENES, GENES_BY_KEY
 warnings.filterwarnings('ignore')
+import time; T0 = time.time()
 
 HERE = os.path.dirname(os.path.abspath(__file__)); COH = f'{HERE}/datos/cohorte'; RES = f'{HERE}/resultados'
 os.makedirs(RES, exist_ok=True); rng = np.random.default_rng(11)
@@ -33,10 +39,11 @@ T = truth.set_index('visit_id'); tr_mod = df.visit_id.map(T.brecha_modificable_r
 
 # ------------------------------------------------------------------ 1) EDAD BIOLÓGICA
 HAB = ['hora_acostarse', 'celular_en_cama', 'sesiones_fuerza_sem', 'min_cardio_sem', 'sedentarismo_h_dia', 'ultraprocesados_sem', 'alcohol_sem', 'dieta_mediterranea_score', 'estres_percibido', 'ansiedad_score', 'calidad_sueno']
-CLOCK = ['glucosa', 'hba1c', 'insulina', 'homa_ir', 'trigliceridos', 'grasa_corporal_pct', 'imc', 'alt', 'ast', 'ldl', 'hdl', 'colesterol_total', 'pa_sistolica', 'homocisteina', 'pcr_us', 'drom_ucarr',
+CLOCK = ['glucosa', 'hba1c', 'insulina_ayunas', 'insulina_post_carga', 'glucosa_post_carga', 'homa_ir', 'trigliceridos', 'grasa_corporal_pct', 'imc', 'alt', 'ast', 'ldl', 'hdl', 'colesterol_total', 'pa_sistolica', 'homocisteina', 'pcr_us', 'drom_ucarr',
          'pic_indice', 'ferritina', 'vitamina_d', 'b12', 'tsh', 'creatinina', 'carga_metales_idx', 'ratio_zn_cu', 'ratio_ca_mg', 'vo2max_ml_kg_min', 'fuerza_agarre_kg', 'masa_magra_kg', 'hrv_rmssd_ms',
+         'apob', 'lipoproteina_a', 'colesterol_no_hdl', 'hemoglobina', 'vcm', 'ade_cv', 'leucocitos', 'nlr', 'plaquetas', 'urea', 'egfr', 'acido_urico', 'ggt', 'fosfatasa_alcalina', 'albumina', 't4_libre',
          'sueno_horas', 'pasos_dia', 'sexo_m'] + HAB + [c for c in df.columns if c.startswith('oligo_')]
-mk_en = lambda: make_pipeline(StandardScaler(), ElasticNetCV(l1_ratio=[.2, .5, .9], cv=3, max_iter=8000))
+mk_en = lambda: make_pipeline(SimpleImputer(strategy='median'), StandardScaler(), ElasticNetCV(l1_ratio=[.2, .5, .9], cv=3, max_iter=8000))
 mk_gb = lambda: HistGradientBoostingRegressor(max_iter=200, learning_rate=0.05, max_depth=3, l2_regularization=1.0, random_state=0)
 # Reloj A
 X, y, g = df[CLOCK], df.edad_cronologica, df.patient_id
@@ -57,26 +64,44 @@ for tr, te in GroupKFold(5).split(lab_df, groups=lab_df.patient_id):
     oofB.loc[tei] = fn(tei); app[unl] += fn(df.index[unl]) / 5
 df['brecha_modificable'] = np.where(df.tiene_ref, oofB, app); df['edad_biologica_modificable'] = df.edad_cronologica + df.brecha_modificable
 corr_B = float(np.corrcoef(df.brecha_modificable[unl], tr_mod[unl])[0, 1]); mae_B = float(mean_absolute_error(tr_mod[unl], df.brecha_modificable[unl]))
-en_f = mk_en().fit(lab_df[FB], lab_df.gap_ref); sc, coef = en_f[0], en_f[1].coef_
+en_f = mk_en().fit(lab_df[FB], lab_df.gap_ref); sc, coef = en_f[1], en_f[2].coef_
 gb_f = mk_gb().fit(lab_df[FB], lab_df.gap_ref); ix = rng.choice(len(lab_df), min(800, len(lab_df)), replace=False)
 pi = permutation_importance(gb_f, lab_df[FB].iloc[ix], lab_df.gap_ref.iloc[ix], n_repeats=3, random_state=0, scoring='neg_mean_absolute_error')
-LBL = {'vo2max_ml_kg_min': 'VO2 máx', 'drom_ucarr': 'D-ROMs', 'pic_indice': 'PIC (placeholder)', 'hba1c': 'HbA1c', 'glucosa': 'Glucosa', 'pcr_us': 'PCR-us', 'carga_metales_idx': 'Carga de metales',
+LBL = {'insulina_ayunas': 'Insulina en ayunas', 'insulina_post_carga': 'Insulina post-carga', 'glucosa_post_carga': 'Glucosa post-carga', 'apob': 'ApoB', 'lipoproteina_a': 'Lipoproteína (a)', 'egfr': 'eGFR',
+       'ade_cv': 'ADE (RDW)', 'vcm': 'VCM', 'ggt': 'GGT', 'acido_urico': 'Ácido úrico', 'nlr': 'Neutrófilos/linfocitos', 'albumina': 'Albúmina', 'fosfatasa_alcalina': 'Fosfatasa alcalina', 'leucocitos': 'Leucocitos',
+       'vo2max_ml_kg_min': 'VO2 máx', 'drom_ucarr': 'D-ROMs', 'pic_indice': 'PIC (placeholder)', 'hba1c': 'HbA1c', 'glucosa': 'Glucosa', 'pcr_us': 'PCR-us', 'carga_metales_idx': 'Carga de metales',
        'fuerza_agarre_kg': 'Fuerza de agarre', 'hrv_rmssd_ms': 'HRV', 'homa_ir': 'HOMA-IR', 'ldl': 'LDL', 'hdl': 'HDL', 'pa_sistolica': 'Presión sistólica', 'grasa_corporal_pct': '% grasa corporal',
        'homocisteina': 'Homocisteína', 'creatinina': 'Creatinina', 'trigliceridos': 'Triglicéridos', 'masa_magra_kg': 'Masa magra', 'sexo_m': 'Sexo', 'ferritina': 'Ferritina', 'vitamina_d': 'Vitamina D',
-       'imc': 'IMC', 'insulina': 'Insulina', 'alt': 'ALT', 'ast': 'AST', 'b12': 'B12', 'tsh': 'TSH', 'colesterol_total': 'Colesterol total', 'sueno_horas': 'Sueño (horas)', 'pasos_dia': 'Pasos/día',
+       'imc': 'IMC', 'alt': 'ALT', 'ast': 'AST', 'b12': 'B12', 'tsh': 'TSH', 'colesterol_total': 'Colesterol total', 'sueno_horas': 'Sueño (horas)', 'pasos_dia': 'Pasos/día',
        'ratio_zn_cu': 'Zn/Cu', 'ratio_ca_mg': 'Ca/Mg', 'hora_acostarse': 'Hora de acostarse', 'celular_en_cama': 'Celular en la cama', 'sesiones_fuerza_sem': 'Sesiones de fuerza', 'min_cardio_sem': 'Cardio (min/sem)',
        'sedentarismo_h_dia': 'Horas sentado', 'ultraprocesados_sem': 'Ultraprocesados', 'alcohol_sem': 'Alcohol', 'dieta_mediterranea_score': 'Dieta mediterránea', 'estres_percibido': 'Estrés percibido',
        'ansiedad_score': 'Ansiedad', 'calidad_sueno': 'Calidad de sueño'}
-lab = lambda c: LBL.get(c, c.replace('oligo_', 'Oligo: ').capitalize())
+lab = lambda c: LBL.get(c, c.replace('oligo_', 'Oligo: ').replace('_', ' ').capitalize())
 importancia = [dict(variable=lab(c), valor=round(float(v), 3)) for c, v in sorted([(c, v) for c, v in zip(FB, pi.importances_mean) if c != 'edad_cronologica'], key=lambda t: -t[1])[:12]]
 def drivers(row):
-    contrib = coef * ((row[FB].values.astype(float) - sc.mean_) / sc.scale_); contrib[FB.index('edad_cronologica')] = 0; o = np.argsort(contrib)
+    xv = row[FB].values.astype(float); xv = np.where(np.isnan(xv), sc.mean_, xv); contrib = coef * ((xv - sc.mean_) / sc.scale_); contrib[FB.index('edad_cronologica')] = 0; o = np.argsort(contrib)
     return ([dict(v=lab(FB[j]), a=round(float(contrib[j]), 2)) for j in o[::-1][:3] if contrib[j] > 0.02], [dict(v=lab(FB[j]), a=round(float(contrib[j]), 2)) for j in o[:3] if contrib[j] < -0.02])
 
+# Reloj C: PhenoAge (Levine 2018). Fórmula publicada, sin ajuste con estos datos.
+# Unidades originales: albúmina g/L (ya viene en g/L), creatinina µmol/L, glucosa mmol/L, ln(PCR mg/dL), linfocitos %, VCM fL, ADE %, FA U/L, leucocitos 10^3/µL
+xb = (-19.9067 - 0.0336 * df.albumina + 0.0095 * (df.creatinina * 88.4) + 0.1953 * (df.glucosa / 18.016) + 0.0954 * np.log(df.pcr_us.clip(lower=0.05) / 10)
+      - 0.0120 * df.linfocitos_pct + 0.0268 * df.vcm + 0.3306 * df.ade_cv + 0.00188 * df.fosfatasa_alcalina + 0.0554 * df.leucocitos + 0.0804 * df.edad_cronologica)
+Mx = 1 - np.exp(-1.51714 * np.exp(xb) / 0.0076927)
+df['phenoage'] = 141.50225 + np.log(-0.00553 * np.log(1 - Mx.clip(1e-9, 1 - 1e-9))) / 0.090165
+off_pheno = float((df.phenoage - df.edad_cronologica)[df.visit_n == 0].mean())   # el simulador genera valores más sanos que la población de Levine: se centra la brecha en el promedio basal
+df['brecha_phenoage'] = df.phenoage - df.edad_cronologica - off_pheno
+brC = df.brecha_phenoage - LinearRegression().fit(df[['edad_cronologica']], df.brecha_phenoage).predict(df[['edad_cronologica']])
+corr_C = float(np.corrcoef(brC, tr_mod)[0, 1]); mae_C = float(mean_absolute_error(df.edad_cronologica, df.phenoage))
+corr_AC = float(np.corrcoef(brA, brC)[0, 1])
+print('PhenoAge: media', round(df.phenoage.mean(), 1), 'edad media', round(df.edad_cronologica.mean(), 1), 'corr con brecha real', round(corr_C, 2), 'corr A-C', round(corr_AC, 2), 'MAE', round(mae_C, 1), f'[{time.time()-T0:.0f}s]')
+
 # ------------------------------------------------------------------ 2) GENÉTICA FIJA (solo PRO) vs MODIFICABLE
-GEN_W = dict(apoe_e4=0.9, mthfr_tt=0.5, fto=0.35, prs=0.45, centro=-0.6)   # reglas de ejemplo, editables
+GEN_W = json.load(open(f'{COH}/parametros_geneticos.json'))   # pesos usados por el simulador (apoe_e4, mthfr_tt, fto, prs, prs_card, foxo3, centro)
+GEN_W['nota'] = 'Reglas de ejemplo editables; los PRS se arman con varios SNPs del panel'
+foxo3_dos = df.foxo3.map({l: i for i, l in enumerate(GENES_BY_KEY['foxo3'][3])})
 pro = df.programa == 'PRO'
-df['brecha_genetica_fija'] = np.where(pro, GEN_W['apoe_e4'] * df.apoe_e4_carrier + GEN_W['mthfr_tt'] * df.mthfr_tt + GEN_W['fto'] * df.fto_alelos_riesgo + GEN_W['prs'] * df.prs_metabolico + GEN_W['centro'], np.nan)
+df['brecha_genetica_fija'] = np.where(pro, GEN_W['apoe_e4'] * df.apoe_e4_carrier + GEN_W['mthfr_tt'] * df.mthfr_tt + GEN_W['fto'] * df.fto_alelos_riesgo + GEN_W['prs'] * df.prs_metabolico
+                                      + GEN_W['prs_card'] * df.prs_cardiovascular + GEN_W['foxo3'] * foxo3_dos + GEN_W['centro'], np.nan)
 df['brecha_total_pro'] = df.brecha_modificable + df.brecha_genetica_fija
 
 # ------------------------------------------------------------------ 3) SCORES POR DOMINIO + LONGEVIDAD + SEGMENTOS
@@ -100,8 +125,8 @@ slopes = {}
 for col, zc in ZMAP.items():
     zt = df.visit_id.map(T[zc]); slopes[col] = float(np.cov(df[col], zt)[0, 1] / np.var(zt, ddof=1))
 Z = StandardScaler().fit(df[df.hito == '0m'][SC]); bs = df[df.hito == '0m'].copy(); Zb = Z.transform(bs[SC])
-sil = {k: float(silhouette_score(Zb, KMeans(k, n_init=20, random_state=0).fit_predict(Zb))) for k in range(3, 8)}; K = max(sil, key=sil.get)
-km = KMeans(K, n_init=20, random_state=0).fit(Zb); cent = km.cluster_centers_
+sil = {k: float(silhouette_score(Zb, KMeans(k, n_init=10, random_state=0).fit_predict(Zb), sample_size=10000, random_state=0)) for k in range(3, 8)}; K = max(sil, key=sil.get)
+km = KMeans(K, n_init=10, random_state=0).fit(Zb); cent = km.cluster_centers_
 ROAD = {'Metabolismo': dict(nutricion='Plan metabólico: carga glucémica y distribución de proteínas', entrenamiento='Fuerza 2-3 veces por semana más zona 2', suplementacion='A criterio médico según laboratorio'),
         'Inflamación': dict(nutricion='Patrón antiinflamatorio, menos ultraprocesados', entrenamiento='Actividad regular de intensidad moderada', suplementacion='Antioxidantes según evaluación médica'),
         'Cardiovascular': dict(nutricion='Perfil lipídico y sodio, fibra', entrenamiento='Aeróbico progresivo y fuerza', suplementacion='Revisar homocisteína y lípidos con el médico'),
@@ -120,7 +145,8 @@ bs['segmento'] = [names[c] for c in km.labels_]; df['segmento'] = df.patient_id.
 P2 = PCA(2, random_state=0).fit_transform(Zb)
 
 COND = {'cond_prediabetes': 'prediabetes', 'cond_resistencia_insulinica': 'resistencia a la insulina', 'cond_dislipidemia': 'dislipidemia', 'cond_presion_elevada': 'presión elevada',
-        'cond_deficit_vitamina_d': 'déficit de vitamina D', 'cond_inflamacion_baja_grado': 'inflamación de bajo grado', 'cond_carga_metales_alta': 'carga de metales alta'}
+        'cond_deficit_vitamina_d': 'déficit de vitamina D', 'cond_inflamacion_baja_grado': 'inflamación de bajo grado', 'cond_carga_metales_alta': 'carga de metales alta',
+        'cond_anemia': 'anemia', 'cond_hiperuricemia': 'hiperuricemia', 'cond_hiperinsulinemia_postcarga': 'hiperinsulinemia post-carga', 'cond_enzimas_hepaticas_elevadas': 'enzimas hepáticas elevadas'}
 def informe(r):
     """borrador para que el médico revise antes de la consulta de integración (no es una indicación)"""
     prios = [d for d in DN if r[DOM[d][0]] < 45]
@@ -141,6 +167,15 @@ def informe(r):
         if r.cyp1a2_cafeina == 'lento': gen.append('metabolizador lento de cafeína')
         if r.vdr_foki == 'ff': gen.append('vigilar vitamina D')
         if r.gstt1 == 'nulo': gen.append('GSTT1 nulo: observar detoxificación')
+        if r.tcf7l2 == 'TT': gen.append('TCF7L2 TT: vigilar glucosa e insulina post-carga')
+        if r.lpa_rs10455872 != 'AA': gen.append('variante LPA: seguir lipoproteína (a)')
+        if r.chr9p21 == 'GG': gen.append('9p21 GG: reforzar prevención cardiovascular')
+        if r.gc_vitd == 'GG': gen.append('GC GG: controlar vitamina D')
+        if r.fut2_b12 == 'AA': gen.append('FUT2 AA: controlar B12')
+        if r.mthfr_a1298c == 'CC': gen.append('MTHFR A1298C CC: revisar homocisteína')
+        if r.actn3 == 'XX': gen.append('ACTN3 XX: priorizar entrenamiento de resistencia')
+        if r.il6_174 == 'CC' or r.tnf_308 == 'AA': gen.append('perfil genético proinflamatorio: seguir PCR-us')
+        if r.hfe in ('C282Y portador', 'compuesto u homocigota'): gen.append('variante HFE: controlar ferritina y saturación de transferrina')
     cond = [v for k, v in COND.items() if r[k] == 1]
     return dict(prioridades=prios, habitos=hab, genetica=gen, padecimientos=cond, hallazgo=r.hallazgo_principal)
 
@@ -229,11 +264,38 @@ oper = dict(embudo=embudo, n_programa={k: int(v) for k, v in nb.items()}, retenc
             cobertura_media=f1(pac.cobertura_anamnesis_pct.mean()), cobertura_lt80=f1((pac.cobertura_anamnesis_pct < 80).mean() * 100),
             retencion_adh={a: dict(r6=f1(100 * pt[pt.adherencia == a].d_brecha_modificable_6m.notna().mean()), r12=f1(100 * pt[pt.adherencia == a].d_brecha_modificable_12m.notna().mean())) for a in ['Alta', 'Media', 'Baja']})
 
+# ------------------------------------------------------------------ 6) INSULINA (AYUNAS vs POST-CARGA) Y GENÉTICA AMPLIADA
+b0 = df[df.hito == '0m']; med = b0.insulina_post_carga.notna()
+INS_REF = 12.0   # µUI/mL, corte de ejemplo para insulina en ayunas
+ins_tab = dict(
+    medido_pct={h: f1(100 * df[df.hito == h].insulina_post_carga.notna().mean()) for h in ('0m', '6m', '12m')},
+    medido_pct_homa_alto=f1(100 * med[b0.homa_ir >= 2.5].mean()), medido_pct_homa_normal=f1(100 * med[b0.homa_ir < 2.5].mean()),
+    ayunas_med=f1(b0.insulina_ayunas.median()), post_med=f1(b0.insulina_post_carga.median()), ratio_med=f1(b0.ratio_insulina_post_ayunas.median(), 1),
+    hiperins_post_pct=f1(100 * b0[med].cond_hiperinsulinemia_postcarga.mean()),
+    ayunas_normal_medidos=int(((b0.insulina_ayunas < INS_REF) & med).sum()),
+    ayunas_normal_hiperins_post_pct=f1(100 * b0[(b0.insulina_ayunas < INS_REF) & med].cond_hiperinsulinemia_postcarga.mean()),
+    glucosa_normal_hiperins_post_pct=f1(100 * b0[(b0.glucosa < 100) & (b0.hba1c < 5.7) & med].cond_hiperinsulinemia_postcarga.mean()),
+    corr_ayunas_post=f1(b0[med][['insulina_ayunas', 'insulina_post_carga']].corr(method='spearman').iloc[0, 1], 2),
+    por_protocolo=[dict(protocolo=p, ayunas12=f1(df[(df.protocolo == p) & (df.hito == '12m')].insulina_ayunas.median()), post12=f1(df[(df.protocolo == p) & (df.hito == '12m')].insulina_post_carga.median()),
+                        ayunas0=f1(df[(df.protocolo == p) & (df.hito == '0m')].insulina_ayunas.median()), post0=f1(df[(df.protocolo == p) & (df.hito == '0m')].insulina_post_carga.median())) for p in ORDER])
+GB_MAP = {'tcf7l2': 'glucosa', 'pparg_pro12ala': 'homa_ir', 'lpa_rs10455872': 'lipoproteina_a', 'cetp_taqib': 'hdl', 'gc_vitd': 'vitamina_d', 'fut2_b12': 'b12', 'il6_174': 'pcr_us', 'tnf_308': 'pcr_us',
+          'mthfr_a1298c': 'homocisteina', 'mc4r': 'imc', 'nos3_glu298asp': 'pa_sistolica', 'sod2_ala16val': 'drom_ucarr', 'gpx1_pro198leu': 'drom_ucarr', 'chr9p21': 'ldl', 'actn3': 'fuerza_agarre_kg',
+          'bdnf_val66met': 'claridad_mental', 'comt_val158met': 'estres_percibido', 'foxo3': 'brecha_modificable'}
+pr0 = df[(df.programa == 'PRO') & (df.hito == '0m')]; gen_asoc = []
+for k, bm in GB_MAP.items():
+    g = GENES_BY_KEY[k]; dos = pr0[k].map({l: i for i, l in enumerate(g[3])}); y_ = pr0[bm]; ok_ = dos.notna() & y_.notna()
+    r_ = float(np.corrcoef(dos[ok_], y_[ok_])[0, 1])
+    gen_asoc.append(dict(clave=k, gen=g[1], rsid=g[2], area=g[6], sentido=g[5], biomarcador=lab(bm), n=[int((dos == i).sum()) for i in range(3)], medias=[f1(y_[dos == i].mean(), 2) for i in range(3)], genotipos=g[3], r=round(r_, 3)))
+hfe_tab = [dict(cat=c, n=int((pr0.hfe == c).sum()), ferritina=f1(pr0[pr0.hfe == c].ferritina.median(), 0)) for c in ['sin variantes', 'H63D portador', 'C282Y portador', 'compuesto u homocigota']]
+mt = [dict(cat=a, n=int((pr0.apoe_e4_carrier == a).sum()), ldl=f1(pr0[pr0.apoe_e4_carrier == a].ldl.mean(), 1)) for a in (0, 1)] + [dict(cat=f'MTHFR TT={a}', n=int((pr0.mthfr_tt == a).sum()), homocisteina=f1(pr0[pr0.mthfr_tt == a].homocisteina.mean(), 1)) for a in (0, 1)]
+gen_asoc_tab = dict(snps=gen_asoc, hfe=hfe_tab, clasicos=mt, n_marcadores=len(GENES) + 9 + 1)
+print('insulina:', json.dumps(ins_tab, ensure_ascii=False)[:600]); print('genes (r):', [(g['clave'], g['biomarcador'], g['r']) for g in gen_asoc]); print(f'[{time.time()-T0:.0f}s] análisis completos')
+
 # ------------------------------------------------------------------ SALIDAS
-df.drop(columns=['sexo_m']).to_csv(f'{RES}/visitas_con_modelos.csv', index=False); pt.reset_index().to_csv(f'{RES}/pacientes_resumen_longitudinal.csv', index=False)
-inf = bs.apply(lambda r: pd.Series(informe(r)), axis=1); inf['patient_id'] = bs.patient_id.values
+df.drop(columns=['sexo_m']).to_csv(f'{RES}/visitas_con_modelos.csv.gz', index=False, compression='gzip'); pt.reset_index().to_csv(f'{RES}/pacientes_resumen_longitudinal.csv.gz', index=False, compression='gzip')
+inf = pd.DataFrame([informe(r) for _, r in bs.iterrows()]); inf['patient_id'] = bs.patient_id.values
 pd.DataFrame(dict(patient_id=inf.patient_id, segmento=bs.segmento.values, prioridades=inf.prioridades.map(', '.join), habitos_a_conversar=inf.habitos.map('; '.join), genetica_para_evaluar=inf.genetica.map('; '.join),
-                  padecimientos_detectados=inf.padecimientos.map(', '.join), hallazgo=inf.hallazgo)).to_csv(f'{RES}/informe_integracion_borrador.csv', index=False)
+                  padecimientos_detectados=inf.padecimientos.map(', '.join), hallazgo=inf.hallazgo)).to_csv(f'{RES}/informe_integracion_borrador.csv.gz', index=False, compression='gzip')
 kpi = dict(pacientes=int(df.patient_id.nunique()), visitas=int(len(df)), pro=int((base.programa == 'PRO').sum()), edad_media=f1(base.edad_cronologica.mean()), brecha_media=f1(base.brecha_modificable.mean(), 2),
            pct_acelerados=f1((base.brecha_modificable >= 2).mean() * 100), ret6=f1(100 * pt.d_brecha_modificable_6m.notna().mean(), 0), ret12=f1(100 * pt.d_brecha_modificable_12m.notna().mean(), 0),
            resp6_plan=rate(pt[pt.tratado].resp_6m), resp6_control=rate(pt[~pt.tratado].resp_6m), d12_plan=ci(pt[pt.tratado].d_brecha_modificable_12m), d12_control=ci(pt[~pt.tratado].d_brecha_modificable_12m),
@@ -243,7 +305,7 @@ hist = {s: np.histogram(base[base.sexo == s].brecha_modificable, bins=np.arange(
 seg_tab = sorted([dict(nombre=nm, n=int((bs.segmento == nm).sum()), scores={d: f1(bs[bs.segmento == nm][DOM[d][0]].mean(), 0) for d in DN}, brecha=f1(bs[bs.segmento == nm].brecha_modificable.mean()), roadmap=roadmap[nm],
                        pct_pro=f1((bs[bs.segmento == nm].programa == 'PRO').mean() * 100, 0)) for nm in names.values()], key=lambda r: -r['n'])
 sm = bs.sample(450, random_state=1)
-full = df.groupby('patient_id').filter(lambda g: len(g) == 3); ids = []
+full = df[df.groupby('patient_id').visit_id.transform('size') == 3]; ids = []
 for p in ORDER:
     for pg in ('PRO', 'BASE'): ids += list(full[(full.protocolo == p) & (full.programa == pg) & (full.hito == '0m')].patient_id.sample(2, random_state=3))
 pats = []
@@ -253,11 +315,11 @@ for pid in ids:
     fam = [k.replace('fam_', '').replace('neurodegenerativa', 'neurodegenerativa') for k in ['fam_cardiovascular', 'fam_diabetes', 'fam_cancer', 'fam_neurodegenerativa'] if r0[k] == 1]
     pats.append(dict(id=pid, sexo=r0.sexo, edad=float(r0.edad_cronologica), programa=r0.programa, protocolo=r0.protocolo, adherencia=r0.adherencia, segmento=r0.segmento, hallazgo=r0.hallazgo_principal,
                      eventos=evs, familia=fam, intol=[x for x, c in (('gluten', r0.intol_gluten_detectada), ('lactosa', r0.intol_lactosa_detectada)) if c == 1],
-                     genetica=None if r0.programa != 'PRO' else dict(apoe=r0.apoe, mthfr=r0.mthfr_c677t, fto=int(r0.fto_alelos_riesgo), ace=r0.ace_id, lct=r0.lct_13910, hla=int(r0.hla_dq2_dq8), vdr=r0.vdr_foki, cyp=r0.cyp1a2_cafeina, gstt1=r0.gstt1),
+                     genetica=None if r0.programa != 'PRO' else dict(apoe=r0.apoe, mthfr=r0.mthfr_c677t, fto=int(r0.fto_alelos_riesgo), ace=r0.ace_id, lct=r0.lct_13910, hla=int(r0.hla_dq2_dq8), vdr=r0.vdr_foki, cyp=r0.cyp1a2_cafeina, gstt1=r0.gstt1, hfe=r0.hfe, panel={g[1]: r0[g[0]] for g in GENES}),
                      gen=f1(r0.brecha_genetica_fija, 2) if r0.programa == 'PRO' else None, up=up, dn=dn_, ritmo=f1(pt.loc[pid, 'ritmo_envejecimiento'], 2), informe=ip,
                      base=dict(scores={d: f1(r0[DOM[d][0]], 1) for d in DN}, brecha=f1(r0.brecha_modificable, 2), ult=int(r0.ultraprocesados_sem), fuerza=int(r0.sesiones_fuerza_sem), estres=f1(r0.estres_percibido), sueno=f1(r0.calidad_sueno), cron=float(r0.edad_cronologica)),
                      visitas=[dict(mes=float(v.meses_desde_baseline), bio=f1(v.edad_biologica_modificable), cron=float(v.edad_cronologica), brecha=f1(v.brecha_modificable), longevidad=f1(v.score_longevidad, 0), scores={d: f1(v[DOM[d][0]], 0) for d in DN},
-                                   drom=float(v.drom_ucarr), pic=float(v.pic_indice), pcr=float(v.pcr_us), glu=float(v.glucosa), ins=float(v.insulina), homa=float(v.homa_ir), vo2=float(v.vo2max_ml_kg_min), metales=float(v.carga_metales_idx), ldl=float(v.ldl),
+                                   drom=float(v.drom_ucarr), pic=float(v.pic_indice), pcr=float(v.pcr_us), glu=float(v.glucosa), ins=f1(v.insulina_ayunas), glu_post=f1(v.glucosa_post_carga, 0), ins_post=f1(v.insulina_post_carga), pheno=f1(v.phenoage), homa=float(v.homa_ir), vo2=float(v.vo2max_ml_kg_min), metales=float(v.carga_metales_idx), ldl=float(v.ldl),
                                    celu=int(v.celular_en_cama), ult=int(v.ultraprocesados_sem), fuerza=int(v.sesiones_fuerza_sem), estres=float(v.estres_percibido), ansiedad=float(v.ansiedad_score), sueno_cal=float(v.calidad_sueno),
                                    energia=float(v.energia), dolor=float(v.dolor), claridad=float(v.claridad_mental), digest=float(v.molestias_digestivas), alerta=int(v.alerta_metabolica_temprana),
                                    cond=[nm for k, nm in COND.items() if v[k] == 1]) for _, v in g.iterrows()]))
@@ -265,10 +327,10 @@ sim = dict(effect={'Nutrición metabólica': (-0.55, -0.25, -0.25, 0.00, 0.10), 
                    'Suplementación y minerales': (0.00, -0.15, -0.05, -0.45, 0.00), 'Combinado integral': (-0.45, -0.40, -0.40, -0.20, 0.40), 'Seguimiento estándar': (0, 0, 0, 0, 0)},
            habw={'Nutrición metabólica': (1.0, 0.2, 0.2), 'Suplementación antioxidante': (0.3, 0.1, 0.2), 'Entrenamiento VO2máx + sueño': (0.2, 1.0, 1.0), 'Suplementación y minerales': (0.3, 0.1, 0.1), 'Combinado integral': (0.9, 0.9, 0.9), 'Seguimiento estándar': (0, 0, 0)},
            gapw=(0.30, 0.25, 0.25, 0.10, -0.10), gapk=3.2, drift=dict(normal=0.03, acelerado=0.16), slopes=[round(slopes[c], 2) for c in SC], long_w=LONG_W, ramp_tau=5)
-out = dict(kpi=kpi, relojes=dict(A=dict(desc='Predice la edad cronológica', mae_edad=f1(mae_A, 2), corr_brecha=f1(corr_A, 2)), B=dict(desc='Calibrado con referencia simulada en 25% de pacientes', n_ref=len(lab_ids), corr_no_vistos=f1(corr_B, 2), mae_no_vistos=f1(mae_B, 2))),
+out = dict(kpi=kpi, relojes=dict(A=dict(desc='Predice la edad cronológica', mae_edad=f1(mae_A, 2), corr_brecha=f1(corr_A, 2)), C=dict(desc='PhenoAge (Levine 2018): fórmula publicada, 9 biomarcadores + edad', mae_edad=f1(mae_C, 2), corr_brecha=f1(corr_C, 2), corr_con_A=f1(corr_AC, 2), sesgo_centrado=f1(off_pheno, 1)), B=dict(desc='Calibrado con referencia simulada en 25% de pacientes', n_ref=len(lab_ids), corr_no_vistos=f1(corr_B, 2), mae_no_vistos=f1(mae_B, 2))),
            importancia=importancia, silhouette={str(k): round(v, 3) for k, v in sil.items()}, K=K, scatter=[dict(c=float(r.edad_cronologica), b=f1(r.edad_biologica_modificable)) for _, r in sm.iterrows()], hist=hist, segmentos=seg_tab,
            pca=[dict(x=f1(P2[i, 0], 2), y=f1(P2[i, 1], 2), c=bs.segmento.iloc[i]) for i in rng.choice(len(bs), 500, replace=False)], proto=by_proto, adh=by_adh, trend=trend, long_trend=long_trend, dom_delta=dom_delta, habitos=habitos,
-           sintomas=sint, sintomas_adh=sint_adh, hallazgo=hallazgo, señal=señal, condiciones=cond_tab, eventos=ev_tab, gen=gen_tab, auc=auc, oper=oper, calidad=calidad, pacientes=pats, dominios=DN, simulador=sim, gen_w=GEN_W)
+           sintomas=sint, sintomas_adh=sint_adh, hallazgo=hallazgo, señal=señal, condiciones=cond_tab, eventos=ev_tab, gen=gen_tab, auc=auc, oper=oper, calidad=calidad, pacientes=pats, dominios=DN, simulador=sim, gen_w=GEN_W, insulina=ins_tab, gen_asoc=gen_asoc_tab)
 json.dump(out, open(f'{RES}/dashboard_data.json', 'w'), ensure_ascii=False, separators=(',', ':'), default=lambda o: o.item() if hasattr(o, 'item') else str(o))
 print(json.dumps(dict(relojes=out['relojes'], K=K, sil=out['silhouette'], auc=auc, kpi=kpi, señal=señal, gen=dict((k, v) for k, v in gen_tab.items() if 'hist' not in k)), ensure_ascii=False, indent=1, default=str))
 print('segmentos:', [(s['nombre'], s['n'], s['pct_pro']) for s in seg_tab])

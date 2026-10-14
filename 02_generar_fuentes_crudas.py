@@ -1,19 +1,23 @@
 """
 02 · FUENTES CRUDAS "SUCIAS" (datos 100% ficticios)
-Toma 200 pacientes de la cohorte limpia y los "desarma" en los archivos sueltos que una clínica real suele tener:
-registro de pacientes, agenda, dos laboratorios (largo y ancho) + PDFs, Oligoscan mensual, D-ROMs/PIC cargados a mano,
-ADN Test (solo PRO), formularios de anamnesis con texto libre y protocolos.
+Toma 500 pacientes de la cohorte limpia y los "desarma" en los archivos sueltos que una clínica real suele tener:
+registro de pacientes, agenda, dos laboratorios (largo y ancho, con el panel completo de 51 analitos) + PDFs, Oligoscan mensual,
+D-ROMs/PIC cargados a mano, ADN Test ampliado (solo PRO), formularios de anamnesis con texto libre y protocolos.
 El pipeline (03) tiene que volver a ordenarlos; la cohorte limpia es la "verdad" para validarlo.
 """
-import numpy as np, pandas as pd, random, os, json, unicodedata
+import numpy as np, pandas as pd, random, os, sys, json, unicodedata
 from datetime import date, datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from catalogo import *
+LAB_LIST = LAB
 COH = f'{HERE}/datos/cohorte'
 OUT = f'{HERE}/datos/fuentes_crudas'
+import shutil; shutil.rmtree(f'{OUT}/pdfs_laboratorio', ignore_errors=True)   # evita mezclar PDFs de corridas anteriores
 os.makedirs(f'{OUT}/pdfs_laboratorio', exist_ok=True)
 rng = np.random.default_rng(99); random.seed(99)
 noacc = lambda s: ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
@@ -21,9 +25,9 @@ noacc = lambda s: ''.join(c for c in unicodedata.normalize('NFD', s) if unicoded
 vis = pd.read_csv(f'{COH}/visitas_longitudinal.csv', parse_dates=['fecha_visita'])
 pac = pd.read_csv(f'{COH}/pacientes.csv', parse_dates=['fecha_nacimiento'])
 evt = pd.read_csv(f'{COH}/eventos_clinicos.csv')
-SUBSET = sorted(rng.choice(pac.patient_id.values, 200, replace=False))
+SUBSET = sorted(rng.choice(pac.patient_id.values, 500, replace=False))
 pac = pac[pac.patient_id.isin(SUBSET)].reset_index(drop=True)
-vis = vis[vis.patient_id.isin(SUBSET)].reset_index(drop=True)
+vis = vis[vis.patient_id.isin(SUBSET)].reset_index(drop=True).copy()
 json.dump(SUBSET, open(f'{HERE}/datos/subset_ids.json', 'w'))
 P = {r.patient_id: r for r in pac.itertuples()}
 MEDICOS = ['Dr. Ledesma', 'Dra. Ibarra', 'Dr. Quiroga', 'Dra. Barrios']
@@ -63,19 +67,13 @@ vis['fecha_estudio'] = vis.fecha_visita + pd.to_timedelta(rng.integers(0, 3, len
 vis['has_oligo'] = rng.random(len(vis)) < np.where(vis.visit_n == 0, 0.95, 0.70)
 vis['has_drompic'] = rng.random(len(vis)) < 0.92
 def src(d):
-    if d >= pd.Timestamp('2026-07-01') and rng.random() < 0.45: return 'PDF'
-    if d >= pd.Timestamp('2026-04-01') and rng.random() < 0.40: return 'B'
+    if d >= pd.Timestamp('2026-01-01') and rng.random() < 0.50: return 'PDF'
+    if d >= pd.Timestamp('2025-07-01') and rng.random() < 0.45: return 'B'
     return 'A'
 vis['lab_src'] = vis.fecha_estudio.map(src)
-LAB = {'glucosa': ('mg/dL', '70 - 99', 0), 'hba1c': ('%', '4.0 - 5.6', 1), 'insulina': ('µU/mL', '2.6 - 24.9', 1), 'colesterol_total': ('mg/dL', '< 200', 0),
-       'hdl': ('mg/dL', '> 40', 0), 'ldl': ('mg/dL', '< 130', 0), 'trigliceridos': ('mg/dL', '< 150', 0), 'pcr_us': ('mg/L', '< 3.0', 2),
-       'homocisteina': ('µmol/L', '5.0 - 15.0', 1), 'vitamina_d': ('ng/mL', '30 - 100', 1), 'b12': ('pg/mL', '200 - 900', 0), 'tsh': ('µUI/mL', '0.4 - 4.0', 2),
-       'ferritina': ('ng/mL', '15 - 300', 0), 'creatinina': ('mg/dL', '0.6 - 1.3', 2), 'alt': ('U/L', '< 41', 0), 'ast': ('U/L', '< 40', 0)}
-NAMES_A = {'glucosa': ['Glucemia', 'GLUCOSA', 'Glucosa en ayunas'], 'hba1c': ['Hemoglobina glicosilada (HbA1c)', 'HbA1c', 'Hb glicosilada'], 'insulina': ['Insulina basal', 'INSULINA'],
-           'colesterol_total': ['Colesterol total', 'COLESTEROL TOTAL'], 'hdl': ['HDL colesterol', 'Col HDL'], 'ldl': ['LDL colesterol', 'Col LDL (calculado)'],
-           'trigliceridos': ['Triglicéridos', 'TRIGLICERIDOS'], 'pcr_us': ['PCR ultrasensible', 'Proteína C reactiva (us)', 'PCR-us'], 'homocisteina': ['Homocisteína', 'HOMOCISTEINA'],
-           'vitamina_d': ['Vitamina D (25-OH)', '25 OH Vitamina D'], 'b12': ['Vitamina B12', 'B12'], 'tsh': ['TSH'], 'ferritina': ['Ferritina'], 'creatinina': ['Creatinina'],
-           'alt': ['TGP (ALT)', 'ALT'], 'ast': ['TGO (AST)', 'AST']}
+LAB = {a['key']: (a['unidad'], a['ref'], a['dec']) for a in LAB_LIST}   # unidad, referencia, decimales (catálogo único)
+NAMES_A = {a['key']: a['alias'] for a in LAB_LIST}
+ALT_P = 0.08   # probabilidad de que un resultado venga en una unidad alternativa
 OLIGO = ['Calcio', 'Magnesio', 'Sodio', 'Potasio', 'Zinc', 'Cobre', 'Hierro', 'Selenio', 'Manganeso', 'Mercurio', 'Plomo', 'Cadmio', 'Aluminio', 'Arsénico', 'Níquel']
 OSYM = dict(zip(OLIGO, ['Ca', 'Mg', 'Na', 'K', 'Zn', 'Cu', 'Fe', 'Se', 'Mn', 'Hg', 'Pb', 'Cd', 'Al', 'As', 'Ni']))
 OREF = {'Calcio': (60, 120), 'Magnesio': (25, 50), 'Sodio': (700, 1000), 'Potasio': (250, 450), 'Zinc': (110, 200), 'Cobre': (10, 22), 'Hierro': (20, 45), 'Selenio': (0.9, 1.6),
@@ -86,7 +84,7 @@ miss_lab = {r.visit_id: {k for k in LAB if rng.random() < 0.03} for r in vis.ite
 miss_ol = {r.visit_id: {k for k in OLIGO if rng.random() < 0.02} for r in vis.itertuples()}
 
 # ================================================================ 01 registro de pacientes
-wb = Workbook(); ws = wb.active; ws.title = 'Pacientes 2025'; ws2 = wb.create_sheet('Pacientes 2026')
+wb = Workbook(); ws = wb.active; ws.title = 'Pacientes hasta 2025'; ws2 = wb.create_sheet('Pacientes 2026')
 header(ws, 1, ['DNI', 'Apellido', 'Nombre', 'Fecha de nacimiento', 'Sexo', 'Localidad', 'Programa', 'Fecha alta'])
 header(ws2, 1, ['Documento', 'Apellido y nombre', 'Nac.', 'Género', 'Ciudad', 'Plan', 'Alta', 'Comentarios'])
 SEXV = {'F': ['F', 'Femenino', 'mujer', 'fem'], 'M': ['M', 'Masculino', 'hombre', 'masc']}
@@ -95,7 +93,7 @@ r1 = r2 = 2; dups = 0
 for p in pac.itertuples():
     alta = base.loc[p.patient_id, 'fecha_visita'] - timedelta(days=int(rng.integers(0, 6)))
     sexo = random.choice(SEXV[p.sexo]) if rng.random() > 0.04 else None
-    if alta.year == 2025:
+    if alta.year <= 2025:
         row = [dni_variant(p.dni), p.apellido if rng.random() > .2 else p.apellido.upper(), p.nombre, date_variant(p.fecha_nacimiento), sexo, p.localidad, random.choice(PROG[p.programa]), date_variant(alta, (0, 1))]
         for j, x in enumerate(row, 1): put(ws, r1, j, x)
         r1 += 1
@@ -137,13 +135,16 @@ widths(ws, [14, 14, 26, 18, 14, 10, 10, 16, 18, 34]); wb.save(f'{OUT}/02_agenda_
 
 # ================================================================ 03 laboratorio
 def lab_cell(kk, val):
-    unit, ref, dec = LAB[kk]; u = unit
-    if kk == 'glucosa' and rng.random() < 0.10: val, u, dec = val / 18.016, 'mmol/L', 2
-    elif kk == 'pcr_us' and rng.random() < 0.15: val, u, dec = val / 10, 'mg/dL', 3
-    elif kk == 'vitamina_d' and rng.random() < 0.08: val, u, dec = val * 2.496, 'nmol/L', 1
+    """Devuelve (resultado, unidad) tal como lo mostraría un laboratorio: a veces en otra unidad, con coma decimal o como texto."""
+    a = LAB_BY_KEY[kk]; u = a['unidad']; dec = a['dec']
+    if kk == 'egfr' and val > 90: return 'Mayor a 90', u            # los laboratorios no informan el valor exacto por encima de 90
+    if a['alts'] and rng.random() < ALT_P:
+        lbl, mult, d2 = a['alts'][int(rng.integers(0, len(a['alts'])))]
+        val, u, dec = val * mult, lbl, d2
     if kk == 'pcr_us' and u == 'mg/L' and val < 0.3: return '<0,3', u
+    if kk == 'relacion_alb_glob' and rng.random() < 0.5: u = 'g/L'   # error real de algunos informes: una relación con unidad
     res = num_variant(round(float(val), dec) if dec else int(round(val)))
-    if rng.random() < 0.2: u = random.choice([u.lower(), u.upper()])
+    if rng.random() < 0.2: u = random.choice([u.lower(), u.upper().replace('Μ', 'µ')])   # (la mayúscula de µ no existe en la fuente Latin-1 del PDF)
     return res, u
 
 def build_A(year):
@@ -155,6 +156,7 @@ def build_A(year):
     for v in vis[(vis.lab_src == 'A') & (vis.fecha_estudio.dt.year == year)].sort_values('fecha_estudio').itertuples():
         p = P[v.patient_id]; idd, idn, idf = dni_variant(p.dni), name_variant(p), date_variant(v.fecha_estudio, (0, 1, 3))
         for kk in LAB:
+            if pd.isna(getattr(v, kk)): continue   # no se midió (p. ej. curva post carga)
             if kk in miss_lab[v.visit_id]:
                 if rng.random() < 0.5: continue
                 res, u = random.choice(['Pendiente', 'N/R', None]), None
@@ -168,19 +170,18 @@ def build_A(year):
         if rng.random() < 0.15: rr += 1
     put(ws, rr + 1, 1, f'Total de determinaciones informadas: {nd}'); put(ws, rr + 2, 1, 'Bioq. M. Quiroga MP 12345 - Firma digital')
     widths(ws, [16, 14, 26, 32, 12, 10, 20]); wb.save(f'{OUT}/03_laboratorio_proveedorA_{year}.xlsx')
-build_A(2025); build_A(2026)
+for _y in sorted(vis[vis.lab_src == 'A'].fecha_estudio.dt.year.unique()): build_A(int(_y))
 
 wb = Workbook(); ws = wb.active; ws.title = 'Hoja1'
-hB = ['N° Orden', 'Apellido y Nombre', 'DNI', 'F. Extracción', 'GLU (mg/dL)', 'HbA1c %', 'INS uU/mL', 'COL-T mg/dL', 'HDL mg/dL', 'LDL mg/dL', 'TG mg/dL', 'PCR-us mg/L',
-      'HCY umol/L', '25-OH VIT D ng/mL', 'B12 pg/mL', 'TSH uUI/mL', 'FERR ng/mL', 'CREA mg/dL', 'TGP U/L', 'TGO U/L']
+hB = ['N° Orden', 'Apellido y Nombre', 'DNI', 'F. Extracción'] + [f"{a['key'].upper()} ({a['unidad']})" for a in LAB_LIST]
 put(ws, 1, 1, 'Centro de Diagnóstico Norte - Exportación de órdenes', True); header(ws, 3, hB)
 rr = 4
 for v in vis[vis.lab_src == 'B'].sort_values('fecha_estudio').itertuples():
     p = P[v.patient_id]; row = [int(rng.integers(40000, 99999)), name_variant(p), dni_variant(p.dni), date_variant(v.fecha_estudio, (0, 1))]
-    for kk in LAB: row.append(random.choice([None, 'NR', '-']) if kk in miss_lab[v.visit_id] else num_variant(getattr(v, kk), 0.5))
+    for kk in LAB: row.append(None if pd.isna(getattr(v, kk)) else random.choice([None, 'NR', '-']) if kk in miss_lab[v.visit_id] else num_variant(getattr(v, kk), 0.5))
     for j, x in enumerate(row, 1): put(ws, rr, j, x)
     rr += 1
-widths(ws, [10, 26, 14, 14] + [12] * 16); wb.save(f'{OUT}/03_laboratorio_proveedorB_2026.xlsx')
+widths(ws, [10, 26, 14, 14] + [12] * len(LAB_LIST)); wb.save(f'{OUT}/03_laboratorio_proveedorB.xlsx')
 
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
@@ -195,10 +196,11 @@ for v in vis[vis.lab_src == 'PDF'].itertuples():
           Paragraph(f'DNI: {int(p.dni):,}'.replace(',', '.') + f"  |  Sexo: {p.sexo}  |  Fecha de extracción: {v.fecha_estudio.strftime('%d/%m/%Y')}", ss['Normal']), Spacer(1, 14)]
     data = [['Determinación', 'Resultado', 'Unidad', 'Valores de referencia']]
     for kk in LAB:
+        if pd.isna(getattr(v, kk)): continue
         if kk in miss_lab[v.visit_id]: data.append([NAMES_A[kk][0], 'Pendiente', '', LAB[kk][1]])
         else:
             res, uu = lab_cell(kk, getattr(v, kk)); data.append([NAMES_A[kk][0], str(res).replace('.', ','), uu, LAB[kk][1]])
-    t = Table(data, colWidths=[190, 80, 70, 130]); t.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D9E1F2')), ('GRID', (0, 0), (-1, -1), 0.3, colors.grey), ('FONTSIZE', (0, 0), (-1, -1), 9)]))
+    t = Table(data, colWidths=[200, 80, 70, 130]); t.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D9E1F2')), ('GRID', (0, 0), (-1, -1), 0.3, colors.grey), ('FONTSIZE', (0, 0), (-1, -1), 8)]))
     doc.build(el + [t, Spacer(1, 16), Paragraph('Bioq. M. Quiroga MP 12345 - Documento sintético para fines de portfolio.', ss['Italic'])]); npdf += 1
 
 # ================================================================ 04 oligoscan
@@ -220,13 +222,13 @@ for mth, g in sorted(ov.groupby('mes')):
 wb.save(f'{OUT}/04_oligoscan_exportaciones.xlsx')
 
 # ================================================================ 05 D-ROMs + PIC manual (sin DNI)
-wb = Workbook(); ws = wb.active; ws.title = 'Registro 2025'; ws2 = wb.create_sheet('Registro 2026')
+wb = Workbook(); ws = wb.active; ws.title = 'Registro hasta 2025'; ws2 = wb.create_sheet('Registro 2026')
 OBS = ['repetir', 'paciente ansioso', 'valor dudoso', 'ok', None, None, None, 'muestra tardía', 'ayuno 8h']
 header(ws, 1, ['Fecha', 'Pac.', 'D-ROMs (U.CARR)', 'PIC', 'Obs']); header(ws2, 1, ['Día', 'Paciente', 'DROMs', 'PIC índice', 'Nivel PIC', 'Observaciones'])
 r1 = r2 = 2
 for v in vis[vis.has_drompic].sort_values('fecha_estudio').itertuples():
     p = P[v.patient_id]; nm = name_variant(p, True); dr = int(v.drom_ucarr) if rng.random() > .03 else None; pic = int(v.pic_indice) if rng.random() > .03 else None
-    if v.fecha_estudio.year == 2025:
+    if v.fecha_estudio.year <= 2025:
         row = [date_variant(v.fecha_estudio, (0, 1)), nm, dr, pic, random.choice(OBS)]
         for j, x in enumerate(row, 1): put(ws, r1, j, x)
         r1 += 1
@@ -237,12 +239,17 @@ for v in vis[vis.has_drompic].sort_values('fecha_estudio').itertuples():
         r2 += 1
 widths(ws, [14, 26, 16, 10, 20]); widths(ws2, [14, 26, 10, 12, 12, 20]); wb.save(f'{OUT}/05_drom_pic_registro_manual.xlsx')
 
-# ================================================================ 06 ADN Test (solo PRO, primera visita)
+# ================================================================ 06 ADN Test ampliado (solo PRO, primera visita): 9 marcadores clásicos + 18 variantes + HFE
 def snp(g):
-    return random.choice([g, g, '/'.join(g), g.lower() if g not in ('Ff', 'FF', 'ff') else g, ' '.join(g)]) if len(g) == 2 else g
+    if len(g) != 2: return g
+    if g[0] != g[1] and rng.random() < 0.10: g = g[::-1]   # heterocigotas informadas "al revés" (GA en lugar de AG)
+    return random.choice([g, g, '/'.join(g), g.lower() if g not in ('Ff', 'FF', 'ff') else g, ' '.join(g)])
+HFE_TXT = {'sin variantes': ['sin variantes', 'Sin variantes', 'Negativo', 'wild type'], 'H63D portador': ['H63D portador', 'H63D (heterocigota)', 'portador H63D'],
+           'C282Y portador': ['C282Y portador', 'C282Y (heterocigota)', 'portador C282Y'], 'compuesto u homocigota': ['C282Y/H63D', 'compuesto u homocigota', 'homocigota C282Y']}
 wb = Workbook(); ws = wb.active; ws.title = 'ADN Test'
 put(ws, 1, 1, 'ADN TEST - Longevidad & Metabolismo (datos 100% ficticios)', True)
-header(ws, 3, ['Fecha informe', 'DNI', 'Paciente', 'APOE', 'MTHFR C677T', 'FTO rs9939609', 'ACE I/D', 'LCT -13910', 'HLA DQ2/DQ8', 'VDR FokI', 'CYP1A2 (cafeína)', 'GSTT1', 'Observaciones'])
+header(ws, 3, ['Fecha informe', 'DNI', 'Paciente', 'APOE', 'MTHFR C677T', 'FTO rs9939609', 'ACE I/D', 'LCT -13910', 'HLA DQ2/DQ8', 'VDR FokI', 'CYP1A2 (cafeína)', 'GSTT1', 'Observaciones']
+       + [f'{g[1]} ({g[2]})' for g in GENES] + ['HFE (C282Y / H63D)'])
 rr = 4; FTOG = {0: 'TT', 1: 'AT', 2: 'AA'}
 for v in vis[(vis.visit_n == 0) & (vis.programa == 'PRO')].itertuples():
     p = P[v.patient_id]
@@ -251,9 +258,10 @@ for v in vis[(vis.visit_n == 0) & (vis.programa == 'PRO')].itertuples():
            snp(v.ace_id), snp(v.lct_13910), random.choice(['Positivo', '+', 'positivo']) if v.hla_dq2_dq8 == 1 else random.choice(['Negativo', '-', 'negativo']),
            random.choice([v.vdr_foki, v.vdr_foki.replace('F', 'F/', 1) if v.vdr_foki == 'Ff' else v.vdr_foki]), random.choice([v.cyp1a2_cafeina.capitalize(), v.cyp1a2_cafeina.upper(), v.cyp1a2_cafeina]),
            random.choice([v.gstt1.capitalize(), v.gstt1, 'nulo (deleción)' if v.gstt1 == 'nulo' else 'Presente']), None]
+    row += [None if rng.random() < 0.02 else snp(getattr(v, g[0])) for g in GENES] + [random.choice(HFE_TXT[v.hfe])]
     for j, x in enumerate(row, 1): put(ws, rr, j, x)
     rr += 1
-widths(ws, [14, 14, 26, 10, 14, 14, 10, 12, 12, 10, 14, 14, 14]); wb.save(f'{OUT}/06_adn_test_PRO.xlsx')
+widths(ws, [14, 14, 26, 10, 14, 14, 10, 12, 12, 10, 14, 14, 14] + [16] * (len(GENES) + 1)); wb.save(f'{OUT}/06_adn_test_PRO.xlsx')
 
 # ================================================================ 07 anamnesis (formularios con texto libre)
 def hora_txt(h):

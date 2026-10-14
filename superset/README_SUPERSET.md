@@ -14,14 +14,14 @@ Después entrá a http://localhost:8088 con el usuario `admin` y la clave de `su
 
 ## Qué crea el script
 - 1 conexión a la base SQLite.
-- 11 conjuntos de datos, cada uno una consulta SQL (las mismas de `sql/consultas_kpi.sql`).
-- 11 gráficos: 3 tarjetas de número (pacientes, brecha inicial, % acelerados), embudo, histograma de la brecha, plan vs. estándar, brecha por protocolo, respondedores a 6 meses, ritmo por adherencia, padecimientos y validación de la limpieza.
+- 18 conjuntos de datos, cada uno una consulta SQL (las mismas de `sql/consultas_kpi.sql`, más las nuevas de laboratorio y genética).
+- 18 gráficos: 6 tarjetas de número (pacientes, brecha inicial, % acelerados, analitos, marcadores genéticos, hiperinsulinemia post-carga con ayunas normal), embudo, histograma de la brecha, plan vs. estándar, brecha por protocolo, respondedores a 6 meses, ritmo por adherencia, insulina en ayunas vs. post-carga, dos relojes de edad biológica, Lp(a) por genotipo, ferritina por variante HFE, padecimientos y validación de la limpieza.
 - 1 tablero con todos los gráficos.
 
 Se puede volver a correr: actualiza lo existente en lugar de duplicarlo.
 
 ## Qué está probado y qué no
-- **Probado:** las 11 consultas SQL sobre la base real, con los números esperados (8.000 pacientes, 0,33, 21,9%, −0,32 y +0,18 a 12 meses). También la secuencia de llamadas del script, contra un servidor simulado (crea 24 elementos y los actualiza al repetir).
+- **Probado:** las 18 consultas SQL de los conjuntos de datos sobre la base real, con los números esperados (42.000 pacientes, 0,70, 27,4%, −0,33 y +0,17 a 12 meses). También la secuencia de llamadas del script, contra un servidor simulado (crea 38 elementos —conexión, 18 conjuntos de datos, 18 gráficos y el tablero— y los actualiza al repetir, sin duplicar).
 - **No probado:** la instalación de Superset y las llamadas contra un Superset real, porque este entorno no puede instalar paquetes. Los tipos de gráfico y sus parámetros pueden variar entre versiones de Superset. Si alguno falla, el script se detiene y muestra el mensaje de error de la API con el nombre del gráfico; con ese mensaje se ajusta un solo parámetro.
 - El diseño del tablero (orden y tamaño de los gráficos) lo arma Superset de forma automática la primera vez. Si querés acomodarlo, se hace desde la interfaz o se ajusta en el código.
 

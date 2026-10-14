@@ -5,19 +5,19 @@ Looker Studio es gratis y se usa con una cuenta personal de Google (Gmail), no h
 Los pasos y menús pueden cambiar con las versiones de Looker Studio; si algo no coincide, buscá la opción equivalente.
 
 ## 1. Cargar los datos (dos opciones)
-- **Subir los CSV directo:** en Looker Studio, Crear → Fuente de datos → conector "Carga de archivos" (File Upload). Subí los 10 CSV de `bi/looker/`. El más grande, `lk_biomarcadores.csv`, pesa unos 22 MB; si el conector rechaza ese tamaño, usá la opción siguiente.
+- **Subir los CSV directo:** en Looker Studio, Crear → Fuente de datos → conector "Carga de archivos" (File Upload). Subí los CSV de `bi/looker/`. Los más grandes, `lk_laboratorio.csv` (~53 MB), `lk_biomarcadores_muestra.csv` (~42 MB, solo 1.500 pacientes) y `lk_visitas.csv` (~29 MB), son pesados; si el conector rechaza ese tamaño, usá la opción siguiente.
 - **Google Sheets o BigQuery:** subí los CSV a Google Drive y abrilos como hojas de cálculo, o cargalos en BigQuery (el modo sandbox es gratis y no pide tarjeta).
 
 Los CSV de `bi/looker/` usan **punto decimal** (0.76): el conector de carga de CSV interpreta la coma como separador de miles y rompe los promedios. Al conectar cada fuente, revisá los tipos de campo: `fecha_visita` hay que pasarla a Fecha (AAAA-MM-DD), y los campos numéricos que tienen celdas vacías (`brecha_genetica_fija`, `brecha_total_pro`, `resp_6m`, `resp_12m`, `ritmo_envejecimiento` y los `d_*`) llegan como Texto: cambiales el tipo a Número.
 
 ## 2. Campos calculados (los mismos números que `sql/consultas_kpi.sql`)
 En `lk_visitas`:
-- **Brecha inicial:** `AVG(CASE WHEN visit_n = 0 THEN brecha_modificable END)` → control: 0,33
-- **% Acelerados:** `COUNT_DISTINCT(CASE WHEN visit_n = 0 AND brecha_modificable >= 2 THEN patient_id END) / COUNT_DISTINCT(CASE WHEN visit_n = 0 THEN patient_id END)` → control: 21,4%
-- **Pacientes:** `COUNT_DISTINCT(patient_id)` → 8.000
+- **Brecha inicial:** `AVG(CASE WHEN visit_n = 0 THEN brecha_modificable END)` → control: 0,70
+- **% Acelerados:** `COUNT_DISTINCT(CASE WHEN visit_n = 0 AND brecha_modificable >= 2 THEN patient_id END) / COUNT_DISTINCT(CASE WHEN visit_n = 0 THEN patient_id END)` → control: 27,4%
+- **Pacientes:** `COUNT_DISTINCT(patient_id)` → 42.000
 
 En `lk_resultados`:
-- **Δ Brecha 12m:** `AVG(d_brecha_modificable_12m)` → control: con plan −0,38 y seguimiento estándar +0,10
+- **Δ Brecha 12m:** `AVG(d_brecha_modificable_12m)` → control: con plan −0,33 y seguimiento estándar +0,17
 - **Δ Longevidad 12m:** `AVG(d_score_longevidad_12m)`
 - **% Respondedores 6m:** `AVG(resp_6m)`
 - **Ritmo de envejecimiento:** `AVG(ritmo_envejecimiento)`
@@ -39,10 +39,10 @@ Semáforo: en las tablas de scores, formato condicional ≥55 verde, 40–54 ám
 - El PIC es un índice genérico (placeholder) y el Oligoscan usa valores ficticios.
 
 ## Si no querés depender de ninguna cuenta
-`bi/estudio_longevidad.sqlite` tiene las 14 tablas del modelo en estrella y se abre con DBeaver (gratis, para Debian) para correr las consultas de `sql/consultas_kpi.sql`. Herramientas de código abierto como Apache Superset o Metabase se pueden instalar en tu propia máquina y conectarse a esa base; verificá en su documentación el conector de SQLite.
+`bi/estudio_longevidad.sqlite` (~150 MB) tiene las 17 tablas del modelo en estrella y se abre con DBeaver (gratis, para Debian) para correr las consultas de `sql/consultas_kpi.sql`. Herramientas de código abierto como Apache Superset o Metabase se pueden instalar en tu propia máquina y conectarse a esa base; verificá en su documentación el conector de SQLite.
 
 ## Alternativa: Power BI
-Si algún día tenés una cuenta que lo permita, `bi/estudio_longevidad_modelo.xlsx` (14 tablas relacionables) y `bi/medidas_DAX.md` dejan el modelo listo. Power BI Desktop solo corre en Windows.
+Si algún día tenés una cuenta que lo permita, `bi/estudio_longevidad_muestra_1500.xlsx` (tablas relacionables de una muestra de 1.500 pacientes; el modelo completo no entra en un Excel) y `bi/medidas_DAX.md` dejan el modelo listo. Power BI Desktop solo corre en Windows.
 
 ## Para el portfolio
 Capturas de las 5 páginas en el README, el HTML publicado como vista previa con simulador, y los scripts 01 a 06 en GitHub.

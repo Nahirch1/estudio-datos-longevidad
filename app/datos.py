@@ -7,11 +7,16 @@ DB = pathlib.Path(__file__).resolve().parent.parent / 'bi' / 'estudio_longevidad
 CON_PACIENTE = ['fact_visita', 'fact_resultado_paciente', 'dim_genetica_pro', 'fact_evento_previo', 'fact_informe_integracion']
 
 
+PESADAS = ('fact_laboratorio', 'fact_biomarcador_muestra')   # ~100 mil filas por 85 columnas: se consultan por columna, no se cargan enteras
+
+
 def cargar(db=DB):
     con = sqlite3.connect(db)
     try:
-        nombres = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
-        return {n: pd.read_sql(f'SELECT * FROM {n}', con) for n in nombres}
+        nombres = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'") if r[0] not in PESADAS]
+        d = {n: pd.read_sql(f'SELECT * FROM {n}', con) for n in nombres}
+        d['_db'] = str(db)
+        return d
     finally:
         con.close()
 
@@ -28,8 +33,7 @@ def filtrar(d, programa=None, sexo=None, grupo_etario=None):
     for t in CON_PACIENTE:
         out[t] = d[t][d[t].patient_id.isin(ids)]
     vis = set(out['fact_visita'].visit_id)
-    for t in ('fact_biomarcador', 'fact_condicion'):
-        out[t] = d[t][d[t].visit_id.isin(vis)]
+    out['fact_condicion'] = d['fact_condicion'][d['fact_condicion'].visit_id.isin(vis)]
     return out
 
 
@@ -73,17 +77,63 @@ def embudo(d):
 
 
 def condiciones(d):
-    c = d['fact_condicion'].merge(d['fact_visita'][['visit_id', 'visit_n']], on='visit_id')
-    c = c[c.visit_n.isin([0, 2])]
-    t = c.groupby(['condicion', 'visit_n']).presente.mean().mul(100).round(1).unstack().rename(columns={0: 'pct_inicio', 2: 'pct_12m'})
+    """% de visitas con la condición al inicio y a los 12 meses. fact_condicion guarda solo las presentes: el denominador sale de fact_visita."""
+    vis = d['fact_visita'][d['fact_visita'].visit_n.isin([0, 2])]; den = vis.groupby('visit_n').size()
+    c = d['fact_condicion'].merge(vis[['visit_id', 'visit_n']], on='visit_id')
+    t = c.groupby(['condicion', 'visit_n']).size().unstack(fill_value=0)
+    t = (t.div(den, axis=1) * 100).round(1).rename(columns={0: 'pct_inicio', 2: 'pct_12m'})
     return t.reset_index().sort_values('pct_inicio', ascending=False)
 
 
-def biomarcador(d, nombre):
-    b = d['fact_biomarcador']
-    b = b[b.biomarcador == nombre].merge(d['fact_visita'][['visit_id', 'meses_desde_baseline']], on='visit_id')
+def _laboratorio(d, columna):
+    """Una columna de fact_laboratorio para los pacientes del filtro actual (consulta directa a SQLite)."""
+    validas = set(d['dim_biomarcador'].columna)
+    if columna not in validas:
+        raise ValueError(f'biomarcador desconocido: {columna}')
+    con = sqlite3.connect(d['_db'])
+    try:
+        x = pd.read_sql(f'SELECT visit_id, patient_id, "{columna}" AS valor FROM fact_laboratorio WHERE "{columna}" IS NOT NULL', con)
+    finally:
+        con.close()
+    return x[x.patient_id.isin(set(d['dim_paciente'].patient_id))]
+
+
+def biomarcador(d, columna):
+    b = _laboratorio(d, columna).merge(d['fact_visita'][['visit_id', 'hito']], on='visit_id')
     b = b.merge(d['dim_paciente'][['patient_id', 'protocolo']], on='patient_id')
+    b['meses_desde_baseline'] = b.hito.map({'0m': 0, '6m': 6, '12m': 12})
     return b.groupby(['protocolo', 'meses_desde_baseline']).valor.mean().round(2).reset_index()
+
+
+def lista_biomarcadores(d):
+    """(columna, nombre, categoría, unidad) de todo lo que hay en laboratorio, ordenado por categoría."""
+    b = d['dim_biomarcador']
+    return b.sort_values(['categoria', 'biomarcador'])[['columna', 'biomarcador', 'categoria', 'unidad']]
+
+
+def insulina(d):
+    """Insulina en ayunas vs post-carga. La post-carga se midió en ~59% de las visitas y NO al azar: se pidió más cuando el HOMA-IR era alto."""
+    ay, po = _laboratorio(d, 'insulina_ayunas'), _laboratorio(d, 'insulina_post_carga')
+    vis = d['fact_visita'][['visit_id', 'hito', 'homa_ir'] if 'homa_ir' in d['fact_visita'] else ['visit_id', 'hito']]
+    m = ay.merge(po[['visit_id', 'valor']], on='visit_id', how='left', suffixes=('_ayunas', '_post')).merge(vis, on='visit_id')
+    t = m.groupby('hito').agg(visitas=('visit_id', 'count'), con_post_carga=('valor_post', 'count'), ayunas_mediana=('valor_ayunas', 'median'), post_mediana=('valor_post', 'median')).round(1)
+    t['pct_con_post_carga'] = (100 * t.con_post_carga / t.visitas).round(1)
+    return t.reset_index()
+
+
+def genotipo_vs_biomarcador(d, marcador, columna):
+    """Media de un biomarcador por genotipo de un marcador del panel (solo programa PRO, visita inicial)."""
+    g = d['dim_genetica_pro'][['patient_id', marcador]]
+    if marcador not in d['dim_genetica_pro'].columns:
+        raise ValueError(marcador)
+    b = _laboratorio(d, columna).merge(d['fact_visita'][d['fact_visita'].visit_n == 0][['visit_id']], on='visit_id').merge(g, on='patient_id')
+    return b.groupby(marcador).valor.agg(pacientes='count', media='mean').round(2).reset_index()
+
+
+def relojes(d):
+    """Brecha media por hito: reloj de biomarcadores y hábitos (A/B) y PhenoAge (C)."""
+    v = d['fact_visita']
+    return v.groupby('hito')[['brecha_modificable', 'brecha_phenoage']].mean().round(2).reset_index()
 
 
 def paciente(d, patient_id):

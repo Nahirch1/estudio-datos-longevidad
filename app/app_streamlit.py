@@ -27,7 +27,7 @@ with st.sidebar:
 F = datos.filtrar(D, prog, sexo, edad)
 K = datos.kpis(F)
 
-t1, t2, t3, t4, t5 = st.tabs(['Resumen', 'Edad biológica', 'Prevención', 'Paciente', 'Calidad de datos'])
+t1, t2, t3, t6, t7, t4, t5 = st.tabs(['Resumen', 'Edad biológica', 'Prevención', 'Laboratorio e insulina', 'Genética', 'Paciente', 'Calidad de datos'])
 
 with t1:
     c = st.columns(4)
@@ -47,7 +47,8 @@ with t2:
     if len(g):
         mod = v0.merge(g[['patient_id']], on='patient_id').brecha_modificable.mean()
         st.info(f"Programa PRO ({len(g)} pacientes): aporte genético fijo {g.brecha_genetica_fija.mean():+.2f} años; parte modificable {mod:+.2f} años. La genética no cambia con los hábitos.")
-    st.caption('La edad biológica sale de biomarcadores; no es un reloj epigenético.')
+    st.dataframe(datos.relojes(F).rename(columns={'brecha_modificable': 'brecha reloj biomarcadores + hábitos', 'brecha_phenoage': 'brecha PhenoAge (Levine 2018)'}), hide_index=True)
+    st.caption('La edad biológica sale de biomarcadores; no es un reloj epigenético. PhenoAge es una fórmula publicada; su correlación con la brecha "real" es en parte por construcción del simulador.')
 
 with t3:
     st.plotly_chart(px.line(datos.tendencia_brecha(F), x='hito', y='brecha_modificable', color='protocolo', markers=True, title='Brecha media por protocolo'))
@@ -55,9 +56,25 @@ with t3:
     a, b = st.columns(2)
     a.plotly_chart(px.bar(datos.ritmo_por_adherencia(F), x='adherencia', y='ritmo_envejecimiento', title='Ritmo de envejecimiento por adherencia'))
     b.dataframe(datos.condiciones(F), hide_index=True)
-    marcador = st.selectbox('Biomarcador', sorted(F['fact_biomarcador'].biomarcador.unique()), index=0)
-    st.plotly_chart(px.line(datos.biomarcador(F, marcador), x='meses_desde_baseline', y='valor', color='protocolo', markers=True))
     st.caption('Las diferencias vienen de efectos cargados en el simulador: muestran qué preguntas se podrían responder con datos reales.')
+
+with t6:
+    lb = datos.lista_biomarcadores(F); lb['etiqueta'] = lb.categoria + ' · ' + lb.biomarcador + ' (' + lb.unidad + ')'
+    sel = st.selectbox('Biomarcador (todos los de laboratorio, hemograma, química, hormonas, oligoelementos)', lb.columna, format_func=lambda c: lb.set_index('columna').etiqueta[c], index=int(list(lb.columna).index('insulina_ayunas')) if 'insulina_ayunas' in set(lb.columna) else 0)
+    st.plotly_chart(px.line(datos.biomarcador(F, sel), x='meses_desde_baseline', y='valor', color='protocolo', markers=True))
+    st.subheader('Insulina en ayunas y post-carga')
+    st.dataframe(datos.insulina(F), hide_index=True)
+    st.caption('La insulina post-carga se midió en ~59% de las visitas y no al azar (más seguido con HOMA-IR alto). Comparar solo entre quienes tienen las dos mediciones.')
+
+with t7:
+    if len(F['dim_genetica_pro']):
+        mk = F['dim_marcador_genetico']; mk = mk[mk.columna.isin(F['dim_genetica_pro'].columns)]
+        gsel = st.selectbox('Marcador', mk.columna, format_func=lambda c: f"{mk.set_index('columna').gen[c]} ({mk.set_index('columna').area[c]})")
+        bsel = st.selectbox('Biomarcador a comparar', lb.columna, format_func=lambda c: lb.set_index('columna').biomarcador[c], index=int(list(lb.columna).index('lipoproteina_a')) if 'lipoproteina_a' in set(lb.columna) else 0, key='bgen')
+        st.dataframe(datos.genotipo_vs_biomarcador(F, gsel, bsel), hide_index=True)
+        st.caption('Panel de 28 marcadores ficticios, solo programa PRO. Las asociaciones son parámetros del simulador; no se interpretan como evidencia clínica.')
+    else:
+        st.info('Elegí el programa PRO para ver el panel genético.')
 
 with t4:
     ids = sorted(F['dim_paciente'].patient_id)

@@ -4,13 +4,17 @@ Lee las fuentes crudas (Excel, PDFs, formularios con texto libre), resuelve iden
 normaliza fechas, decimales y unidades, descarta duplicados y arma una fila por visita.
 Luego se valida contra la cohorte limpia (la "verdad" del simulador) y se guarda un informe de calidad.
 Salida: datos/pipeline_salida/visitas_unificadas.csv y calidad_datos.json
+Panel de laboratorio completo (51 analitos) y genética ampliada (28 marcadores): ambos se definen en catalogo.py.
 """
-import pandas as pd, numpy as np, re, json, os, glob, unicodedata, difflib
+import pandas as pd, numpy as np, re, json, os, sys, glob, unicodedata, difflib
 from collections import Counter
 from datetime import datetime
 import pdfplumber
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import catalogo
+from catalogo import LAB as LAB_LIST, LAB_KEYS, LAB_BY_KEY, GENES, HFE_CATS, GEN_COLS, egfr_ckdepi_2021, canon_analyte, a_unidad_limpia
 RAW = f'{HERE}/datos/fuentes_crudas'; COH = f'{HERE}/datos/cohorte'; OUT = f'{HERE}/datos/pipeline_salida'
 os.makedirs(OUT, exist_ok=True)
 stats, ex = Counter(), {}
@@ -36,6 +40,7 @@ def parse_date(x):
     for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d/%m/%y'):
         try:
             d = datetime.strptime(s, fmt); stats['fechas_como_texto'] += 1
+            if d.year > 2026: d = d.replace(year=d.year - 100); stats['anios_de_2_digitos_corregidos'] += 1; example('anio_2_digitos', s, d.strftime('%Y-%m-%d') + ' ("65" es 1965, no 2065)')
             if fmt != '%Y-%m-%d':
                 a, b = s.split('/')[:2]
                 if int(a) <= 12 and int(b) <= 12: stats['fechas_ambiguas_dia_mes'] += 1; example('fecha', s, d.strftime('%Y-%m-%d') + ' (se asume día/mes)')
@@ -50,8 +55,8 @@ def parse_num(x):
     if isinstance(x, (int, float, np.integer, np.floating)): return float(x), False
     s = str(x).strip(); low = noacc(s).lower()
     if low in MISSING: stats['valores_pendientes_o_faltantes'] += 1; return np.nan, False
-    cens = s.startswith('<')
-    if cens: stats['valores_censurados'] += 1; s = s[1:]
+    cens = s.startswith(('<', '>')) or low.startswith(('mayor a', 'menor a'))
+    if cens: stats['valores_censurados'] += 1; s = re.sub(r'^\s*(<|>|mayor a|menor a)\s*', '', s, flags=re.I)
     s = re.sub(r'/10$', '', s.strip()); s = re.sub(r'[^\d,\.\-]', '', s.replace(' ', ''))
     if ',' in s: stats['decimales_con_coma'] += 1; s = s.replace(',', '.')
     try: return float(s), cens
@@ -61,7 +66,7 @@ def toks(s): return [t for t in re.sub(r'[^a-z\s]', ' ', noacc(s).lower()).split
 
 # ------------------------------------------------------------------ 1) maestro de pacientes (registro, con duplicados)
 recs = []
-r25 = pd.read_excel(f'{RAW}/01_registro_pacientes.xlsx', sheet_name='Pacientes 2025', dtype=object)
+r25 = pd.read_excel(f'{RAW}/01_registro_pacientes.xlsx', sheet_name='Pacientes hasta 2025', dtype=object)
 r26 = pd.read_excel(f'{RAW}/01_registro_pacientes.xlsx', sheet_name='Pacientes 2026', dtype=object)
 for r in r25.itertuples(index=False):
     recs.append(dict(dni=parse_dni(r[0]), name=f'{r[1]} {r[2]}', nac=parse_date(r[3]), sexo=r[4], loc=r[5], prog=r[6], origen=1))
@@ -117,20 +122,14 @@ def match_name(s, fecha):
     return res
 
 # ------------------------------------------------------------------ 3) laboratorio (3 formatos: largo A, ancho B, PDF)
-def canon_analyte(n):
-    n = noacc(n).lower()
-    for pat, k in [(r'hba1c|hemoglobina glic|hb glic', 'hba1c'), (r'glucemia|glucosa', 'glucosa'), (r'insulina', 'insulina'), (r'colesterol total', 'colesterol_total'), (r'hdl', 'hdl'),
-                   (r'ldl', 'ldl'), (r'trigliceridos', 'trigliceridos'), (r'pcr|proteina c reactiva', 'pcr_us'), (r'homocisteina', 'homocisteina'), (r'vitamina d|25 oh', 'vitamina_d'),
-                   (r'b12', 'b12'), (r'\btsh\b', 'tsh'), (r'ferritina', 'ferritina'), (r'creatinina', 'creatinina'), (r'tgp|\balt\b', 'alt'), (r'tgo|\bast\b', 'ast')]:
-        if re.search(pat, n): return k
-    return None
 def convert(k, v, unit, raw):
-    u = noacc(str(unit)).lower() if not isna(unit) else ''
-    if k == 'glucosa' and 'mmol' in u: stats['conversiones_unidad_glucosa'] += 1; example('unidad', raw, f'{round(v * 18.016)} mg/dL'); return v * 18.016
-    if k == 'pcr_us' and 'mg/dl' in u: stats['conversiones_unidad_pcr'] += 1; return v * 10
-    if k == 'vitamina_d' and 'nmol' in u: stats['conversiones_unidad_vitD'] += 1; return v / 2.496
-    return v
-LAB_ORDER = ['glucosa', 'hba1c', 'insulina', 'colesterol_total', 'hdl', 'ldl', 'trigliceridos', 'pcr_us', 'homocisteina', 'vitamina_d', 'b12', 'tsh', 'ferritina', 'creatinina', 'alt', 'ast']
+    """lleva el valor a la unidad del catálogo (tabla única de unidades alternativas)"""
+    v2, hecho = a_unidad_limpia(k, v, unit)
+    if hecho:
+        stats[f'conversiones_de_unidad'] += 1; stats[f'conversiones_unidad_{k}'] += 1
+        if k in ('glucosa', 'bilirrubina_total', 'hemoglobina', 'urea', 'creatinina'): example(f'unidad_{k}', raw, f'{round(v2, 2)} {LAB_BY_KEY[k]["unidad"]}')
+    return v2
+LAB_ORDER = LAB_KEYS
 lab = []   # (dni, fecha, analito, valor, censurado, fuente)
 for f in sorted(glob.glob(f'{RAW}/03_laboratorio_proveedorA_*.xlsx')):
     d = pd.read_excel(f, header=3, dtype=object); d.columns = ['fecha', 'dni', 'paciente', 'det', 'res', 'unidad', 'ref']
@@ -138,20 +137,18 @@ for f in sorted(glob.glob(f'{RAW}/03_laboratorio_proveedorA_*.xlsx')):
     n0 = len(d); d['_k'] = d.fecha.astype(str) + d.dni.astype(str) + d.det.astype(str) + d.res.astype(str); d = d.drop_duplicates('_k')
     stats['filas_duplicadas_eliminadas'] += n0 - len(d); stats['filas_laboratorio_A'] += len(d)
     for r in d.itertuples():
-        k = canon_analyte(r.det)
+        k = canon_analyte(str(r.det))
         if not k: stats['determinaciones_no_reconocidas'] += 1; continue
         v, cens = parse_num(r.res)
         if cens: example('censurado', f'{r.det} {r.res} {r.unidad}', f'{k} = {v} (marcado como censurado)')
         if not np.isnan(v): v = convert(k, v, r.unidad, f'{r.det} {r.res} {r.unidad}')
         lab.append((parse_dni(r.dni), parse_date(r.fecha), k, v, cens, 'A'))
-d = pd.read_excel(f'{RAW}/03_laboratorio_proveedorB_2026.xlsx', header=2, dtype=object)
+d = pd.read_excel(f'{RAW}/03_laboratorio_proveedorB.xlsx', header=2, dtype=object)
 stats['filas_laboratorio_B'] = len(d)
 for r in d.itertuples(index=False):
     for j, k in enumerate(LAB_ORDER):
         v, cens = parse_num(r[4 + j]); lab.append((parse_dni(r[2]), parse_date(r[3]), k, v, cens, 'B'))
-PDFN = [('Hemoglobina glicosilada (HbA1c)', 'hba1c'), ('Vitamina D (25-OH)', 'vitamina_d'), ('Glucemia', 'glucosa'), ('Insulina basal', 'insulina'), ('Colesterol total', 'colesterol_total'),
-        ('HDL colesterol', 'hdl'), ('LDL colesterol', 'ldl'), ('Triglicéridos', 'trigliceridos'), ('PCR ultrasensible', 'pcr_us'), ('Homocisteína', 'homocisteina'), ('Vitamina B12', 'b12'),
-        ('TSH', 'tsh'), ('Ferritina', 'ferritina'), ('Creatinina', 'creatinina'), ('TGP (ALT)', 'alt'), ('TGO (AST)', 'ast')]
+PDFN = sorted([(a['nombre'], a['key']) for a in LAB_LIST], key=lambda t: -len(t[0]))   # el nombre más largo primero (p. ej. 'Glucemia 2 h post carga' antes que 'Glucemia')
 for f in sorted(glob.glob(f'{RAW}/pdfs_laboratorio/*.pdf')):
     with pdfplumber.open(f) as pdf: txt = '\n'.join((p.extract_text() or '') for p in pdf.pages)
     dni = parse_dni(re.search(r'DNI:\s*([\d\.]+)', txt).group(1)); fe = parse_date(re.search(r'extracción:\s*(\d{2}/\d{2}/\d{4})', txt).group(1)); stats['pdfs_leidos'] += 1
@@ -160,6 +157,7 @@ for f in sorted(glob.glob(f'{RAW}/pdfs_laboratorio/*.pdf')):
             if line.startswith(nm):
                 t = line[len(nm):].split()
                 if not t: break
+                if t[0].lower() in ('mayor', 'menor') and len(t) > 2: t = [' '.join(t[:3])] + t[3:]   # "Mayor a 90"
                 v, cens = parse_num(t[0]); unit = t[1] if len(t) > 1 and v == v else ''
                 if not np.isnan(v): v = convert(k, v, unit, f'{nm} {t[0]} {unit}')
                 lab.append((dni, fe, k, v, cens, 'PDF')); stats['determinaciones_desde_pdf'] += 1
@@ -191,7 +189,7 @@ for sh, d in sheets.items():
         orows.append(dict(dni=dni, visita=vis_, **{c: parse_num(r[c])[0] for c in omap.values() if c in r}))
 O = pd.DataFrame(orows).drop_duplicates(['dni', 'visita']).set_index(['dni', 'visita']) if orows else pd.DataFrame()
 drows = []
-for sh, cols in [('Registro 2025', ['fecha', 'pac', 'drom', 'pic', 'obs']), ('Registro 2026', ['fecha', 'pac', 'drom', 'pic', 'nivel', 'obs'])]:
+for sh, cols in [('Registro hasta 2025', ['fecha', 'pac', 'drom', 'pic', 'obs']), ('Registro 2026', ['fecha', 'pac', 'drom', 'pic', 'nivel', 'obs'])]:
     d = pd.read_excel(f'{RAW}/05_drom_pic_registro_manual.xlsx', sheet_name=sh, dtype=object); d.columns = cols
     for r in d.itertuples():
         fe = parse_date(r.fecha); dni = match_name(r.pac, fe); vis_ = assign_visit(dni, fe)
@@ -202,19 +200,37 @@ example('nombre_sin_dni_drom', 'D-ROMs/PIC: registro manual solo con nombre (ej.
 D = pd.DataFrame(drows).drop_duplicates(['dni', 'visita']).set_index(['dni', 'visita'])
 
 # ------------------------------------------------------------------ 5) ADN Test (solo PRO)
-adn = pd.read_excel(f'{RAW}/06_adn_test_PRO.xlsx', header=2, dtype=object); adn.columns = ['fecha', 'dni', 'paciente', 'apoe', 'mthfr', 'fto', 'ace', 'lct', 'hla', 'vdr', 'cyp', 'gstt1', 'obs']
+adn = pd.read_excel(f'{RAW}/06_adn_test_PRO.xlsx', header=2, dtype=object)
+adn.columns = ['fecha', 'dni', 'paciente', 'apoe', 'mthfr', 'fto', 'ace', 'lct', 'hla', 'vdr', 'cyp', 'gstt1', 'obs'] + [g[0] for g in GENES] + ['hfe']
 def let(s): return re.sub(r'[^A-Za-z]', '', str(s))
 FTOC = {'TT': 0, 'AT': 1, 'TA': 1, 'AA': 2}
+def geno(x, labels):
+    """normaliza un genotipo escrito de muchas formas (AG, A/G, a g, GA) a la etiqueta del catálogo; None si no se puede"""
+    if isna(x): return None
+    return {''.join(sorted(l)): l for l in labels}.get(''.join(sorted(let(x).upper())))
+def hfe_cat(x):
+    t = noacc(str(x)).lower()
+    if isna(x): return None
+    if 'homocigota' in t or 'compuesto' in t or ('c282y' in t and 'h63d' in t): return HFE_CATS[3]
+    if 'c282y' in t: return HFE_CATS[2]
+    if 'h63d' in t: return HFE_CATS[1]
+    return HFE_CATS[0]
 arows = {}
-for r in adn.itertuples():
-    dni = parse_dni(r.dni)
+for r in adn.itertuples(index=False):
+    r = r._asdict(); dni = parse_dni(r['dni'])
     if dni is None: continue
-    ap = sorted(re.findall(r'e[234]', str(r.apoe).lower()))
-    arows[dni] = dict(apoe='/'.join(ap), apoe_e4_carrier=int('e4' in ap), mthfr_c677t=let(r.mthfr).upper(), ace_id=let(r.ace).upper(), lct_13910=let(r.lct).upper(),
-                      fto_alelos_riesgo=FTOC.get(let(r.fto).upper()), hla_dq2_dq8=int(noacc(str(r.hla)).lower() in ('positivo', '+')),
-                      vdr_foki='Ff' if let(r.vdr).lower() == 'ff' and let(r.vdr) not in ('FF', 'ff') else let(r.vdr), cyp1a2_cafeina='rápido' if 'rapid' in noacc(str(r.cyp)).lower() else 'lento',
-                      gstt1='nulo' if 'nulo' in str(r.gstt1).lower() else 'presente')
+    ap = sorted(re.findall(r'e[234]', str(r['apoe']).lower()))
+    arows[dni] = dict(apoe='/'.join(ap), apoe_e4_carrier=int('e4' in ap), mthfr_c677t=geno(r['mthfr'], ['CC', 'CT', 'TT']), ace_id=geno(r['ace'], ['II', 'ID', 'DD']), lct_13910=geno(r['lct'], ['CC', 'CT', 'TT']),
+                      fto_alelos_riesgo=FTOC.get(let(r['fto']).upper()), hla_dq2_dq8=int(noacc(str(r['hla'])).lower() in ('positivo', '+')),
+                      vdr_foki='Ff' if let(r['vdr']).lower() == 'ff' and let(r['vdr']) not in ('FF', 'ff') else let(r['vdr']), cyp1a2_cafeina='rápido' if 'rapid' in noacc(str(r['cyp'])).lower() else 'lento',
+                      gstt1='nulo' if 'nulo' in str(r['gstt1']).lower() else 'presente')
     arows[dni]['mthfr_tt'] = int(arows[dni]['mthfr_c677t'] == 'TT')
+    for g in GENES:
+        arows[dni][g[0]] = geno(r[g[0]], g[3])
+        if isna(r[g[0]]): stats['variantes_geneticas_sin_dato'] += 1
+        elif arows[dni][g[0]] is not None and str(r[g[0]]).strip() != arows[dni][g[0]]: stats['genotipos_normalizados'] += 1
+    arows[dni]['hfe'] = hfe_cat(r['hfe'])
+example('genotipo', 'ADN Test: "g a" / "G/A" / "ga" (heterocigota escrita al revés)', 'AG (una sola etiqueta por genotipo)')
 stats['pacientes_con_adn'] = len(arows)
 
 # ------------------------------------------------------------------ 6) anamnesis (formularios con texto libre)
@@ -283,11 +299,19 @@ U['meses_desde_baseline'] = ((U.fecha_visita - U.groupby('dni').fecha_visita.tra
 for c in ('programa', 'sexo'): U[c] = U.dni.map(lambda d: master.get(d, {}).get(c))
 U['edad_cronologica'] = ((U.fecha_visita - U.dni.map(lambda d: master[d]['nac'])).dt.days / 365.25).round(1)
 for k in ('protocolo', 'adherencia', 'hallazgo_principal'): U[k] = U.dni.map(lambda d: prot.get(d, {}).get(k))
-for k in ('apoe', 'apoe_e4_carrier', 'mthfr_c677t', 'mthfr_tt', 'fto_alelos_riesgo', 'ace_id', 'lct_13910', 'hla_dq2_dq8', 'vdr_foki', 'cyp1a2_cafeina', 'gstt1'):
+for k in ('apoe', 'apoe_e4_carrier', 'mthfr_c677t', 'mthfr_tt', 'fto_alelos_riesgo', 'ace_id', 'lct_13910', 'hla_dq2_dq8', 'vdr_foki', 'cyp1a2_cafeina', 'gstt1') + tuple(GEN_COLS):
     U[k] = U.dni.map(lambda d: arows.get(d, {}).get(k))
 for k in ('fam_cardiovascular', 'fam_diabetes', 'fam_cancer', 'fam_neurodegenerativa', 'intol_gluten_detectada', 'intol_lactosa_detectada', 'n_eventos_previos'):
     U[k] = U.dni.map(lambda d: estat.get(d, {}).get(k))
-U['homa_ir'] = (U.glucosa * U.insulina / 405).round(2); U['ratio_tg_hdl'] = (U.trigliceridos / U.hdl).round(2)
+# el laboratorio informa FGe "Mayor a 90": se recalcula con CKD-EPI 2021 (creatinina, edad y sexo) en lugar de dejar 90
+if 'egfr_censurado' in U:
+    m = U.egfr_censurado.fillna(False).astype(bool) & U.creatinina.notna() & U.sexo.notna() & U.edad_cronologica.notna()
+    U.loc[m, 'egfr'] = [round(egfr_ckdepi_2021(c, e, x)) for c, e, x in zip(U.creatinina[m], U.edad_cronologica[m], U.sexo[m])]
+    U.loc[m, 'egfr_censurado'] = False; stats['filtrado_glomerular_recalculado_ckd_epi'] = int(m.sum())
+    example('egfr', 'FGe informado como "Mayor a 90 ml/min/1,73 m²" (el laboratorio no da el valor exacto)', 'recalculado con CKD-EPI 2021 desde creatinina, edad y sexo')
+U['homa_ir'] = (U.glucosa * U.insulina_ayunas / 405).round(2); U['ratio_tg_hdl'] = (U.trigliceridos / U.hdl).round(2)
+U['colesterol_no_hdl'] = (U.colesterol_total - U.hdl).round(0); U['nlr'] = (U.neutrofilos_pct / U.linfocitos_pct).round(2)
+U['ratio_insulina_post_ayunas'] = (U.insulina_post_carga / U.insulina_ayunas).round(2)
 U['carga_metales_idx'] = (U[['oligo_mercurio', 'oligo_plomo', 'oligo_cadmio', 'oligo_aluminio', 'oligo_arsenico', 'oligo_niquel']].div([0.8, 1.5, 0.12, 7.0, 0.2, 0.9]).mean(axis=1)).round(3)
 U['ratio_zn_cu'] = (U.oligo_zinc / U.oligo_cobre).round(2); U['ratio_ca_mg'] = (U.oligo_calcio / U.oligo_magnesio).round(2)
 U['fecha_visita'] = U.fecha_visita.dt.strftime('%Y-%m-%d')
@@ -299,12 +323,15 @@ coh = pd.read_csv(f'{COH}/visitas_longitudinal.csv'); pac = pd.read_csv(f'{COH}/
 T = coh.merge(pac[['patient_id', 'dni']], on='patient_id'); T['dni'] = T.dni.astype(str)
 T = T[T.dni.isin(set(U.dni))]
 M = U.merge(T, on=['dni', 'fecha_visita'], suffixes=('', '_t')); stats['visitas_en_agenda'] = len(U); stats['visitas_cohorte_subset'] = len(T); stats['visitas_emparejadas_con_la_verdad'] = len(M)
-GR = {'Laboratorio (16 analitos)': ('num', LAB_ORDER), 'Oligoscan (15 minerales y metales)': ('num', [omap[k] for k in omap if k.startswith('')][:0] or sorted(set(omap.values()))),
+HEMO = [a['key'] for a in LAB_LIST if a['cat'] == 'Hemograma']; QUIM = [a['key'] for a in LAB_LIST if a['cat'] != 'Hemograma']
+GR = {f'Laboratorio: química, lípidos y hormonas ({len(QUIM)} analitos)': ('num', QUIM), f'Laboratorio: hemograma completo ({len(HEMO)} analitos)': ('num', HEMO),
+      'Oligoscan (15 minerales y metales)': ('num', sorted(set(omap.values()))),
       'D-ROMs y PIC': ('num', ['drom_ucarr', 'pic_indice']),
       'Hábitos y síntomas (numéricos)': ('num', ['hora_acostarse', 'sesiones_fuerza_sem', 'min_cardio_sem', 'sedentarismo_h_dia', 'ultraprocesados_sem', 'alcohol_sem', 'dieta_mediterranea_score', 'estres_percibido', 'ansiedad_score',
                                                   'calidad_sueno', 'energia', 'dolor', 'claridad_mental', 'molestias_digestivas']),
       'Hábitos (categóricos) y antecedentes en texto libre': ('cat', ['celular_en_cama', 'tabaquismo', 'fam_cardiovascular', 'fam_diabetes', 'fam_cancer', 'fam_neurodegenerativa', 'intol_gluten_detectada', 'intol_lactosa_detectada']),
-      'Genética (ADN Test, solo PRO)': ('cat', ['apoe', 'mthfr_c677t', 'fto_alelos_riesgo', 'ace_id', 'lct_13910', 'hla_dq2_dq8', 'vdr_foki', 'cyp1a2_cafeina', 'gstt1']),
+      f'Genética (ADN Test, solo PRO, {9 + len(GENES) + 1} marcadores)': ('cat', ['apoe', 'mthfr_c677t', 'fto_alelos_riesgo', 'ace_id', 'lct_13910', 'hla_dq2_dq8', 'vdr_foki', 'cyp1a2_cafeina', 'gstt1'] + GEN_COLS),
+      'Edad calculada desde la fecha de nacimiento': ('num', ['edad_cronologica']),
       'Identidad y plan': ('cat', ['programa', 'sexo', 'protocolo', 'adherencia', 'hallazgo_principal'])}
 val = []
 for g, (typ, cols) in GR.items():
@@ -317,7 +344,7 @@ for g, (typ, cols) in GR.items():
         if c == 'hallazgo_principal': mask &= (M['visit_n'] == 0)   # el hallazgo se registra en la consulta de integración (primera visita)
         if c in LAB_ORDER and c + '_censurado' in M: mask &= ~M[c + '_censurado'].fillna(False).astype(bool)
         if typ == 'num':
-            tol = np.maximum(0.015 * b[mask].abs(), 0.06 if c in LAB_ORDER or c.startswith('oligo') else 0.025)
+            tol = 0.2 if c == 'edad_cronologica' else np.maximum(0.015 * b[mask].abs(), 0.06 if c in LAB_ORDER or c.startswith('oligo') else 0.025)
             good = ((a[mask].astype(float) - b[mask].astype(float)).abs() <= tol)
         else: good = (a[mask].astype(str).str.strip().str.lower() == b[mask].astype(str).str.strip().str.lower())
         n += int(mask.sum()); ok += int(good.sum())

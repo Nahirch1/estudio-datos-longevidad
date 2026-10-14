@@ -1,7 +1,10 @@
 """Inserta resultados/dashboard_data.json y el contexto de Argentina en la plantilla HTML."""
-import json, pathlib
+import json, pathlib, sys
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from catalogo import LAB, DERIVADOS
 b = pathlib.Path(__file__).parent
 data = json.loads((b/'resultados/dashboard_data.json').read_text(encoding='utf-8'))
+data['catalogo'] = dict(n_lab=len(LAB), n_derivados=len(DERIVADOS) + 1)
 ctx = dict(
  aviso='Contexto público para dimensionar el problema. No prueba demanda por medicina preventiva: el embudo y la retención de este tablero son simulados.',
  items=[
